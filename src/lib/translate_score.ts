@@ -3,6 +3,7 @@ import { pipeline, cos_sim } from "@xenova/transformers/node";
 import * as unic from "unorm";
 
 // Ensure OPENAI_API_KEY is set in your environment variables
+// Consider adding error handling for missing API key
 const openai = new OpenAI({});
 
 export interface Pair {
@@ -17,7 +18,7 @@ export interface Scored extends Pair {
 }
 
 async function translateToHebrew(text: string): Promise<string> {
- console.log(`[OpenAI] Attempting to translate text: "${text.substring(0, 50)}..."`); // Log before call
+ console.log(`[OpenAI] Preparing to translate text: "${text.substring(0, 50)}..."`); // Log before call
  try {
   const chat = await openai.chat.completions.create({
   model: "gpt-4o-mini", // or gpt‑3.5‑turbo
@@ -79,12 +80,14 @@ async function cosine(a: string, b: string): Promise<number> {
   // Normalize inputs for embedding
   const normalizedA = normalise(a);
   const normalizedB = normalise(b);
+  console.log(`[Cosine] Calculating similarity between: "${normalizedA.substring(0,50)}..." and "${normalizedB.substring(0,50)}..."`)
   const [v1, v2] = await emb([normalizedA, normalizedB], { pooling: 'mean', normalize: true });
   // Using node's cos_sim which expects specific data structure from the model output
   const similarity = cos_sim(v1.data, v2.data);
+  console.log(`[Cosine] Calculated similarity: ${similarity}`);
   return Math.max(0, Math.min(1, similarity)); // Clamp between 0 and 1
  } catch (error) {
-   console.error("Error calculating cosine similarity:", error);
+   console.error("[Cosine] Error calculating cosine similarity:", error);
    // Decide how to handle embedding/cosine errors
    return 0; // Return 0 or another indicator of failure
  }
@@ -93,15 +96,31 @@ async function cosine(a: string, b: string): Promise<number> {
 // ---------- main scorer -----------------------------------------------
 export async function scorePair(pair: Pair): Promise<Omit<Scored, 'en' | 'he'>> {
  const { en, he } = pair;
+ console.log(`[ScorePair] Scoring pair: EN="${en.substring(0, 50)}...", HE="${he.substring(0, 50)}..."`);
+ console.log(`[ScorePair] Calling OpenAI for translation...`);
  const mt = await translateToHebrew(en);
+
+ if (mt === "[Translation Error]") {
+    console.warn("[ScorePair] Skipping scoring due to translation error.");
+    // Return default scores indicating failure
+    return { mt, bleu: 0, cosine: 0, blended: 0 };
+ }
+
+ console.log(`[ScorePair] Normalizing texts for BLEU...`);
  const normalizedHe = normalise(he);
  const normalizedMt = normalise(mt);
 
+ console.log(`[ScorePair] Calculating BLEU score...`);
  const bleu = bleu1(normalizedHe, normalizedMt);
- const cos = await cosine(he, mt); // Use original Hebrew for cosine? Or normalized? Let's stick to original for semantic meaning.
+ console.log(`[ScorePair] BLEU score: ${bleu}`);
+
+ console.log(`[ScorePair] Calculating Cosine similarity...`);
+ const cos = await cosine(he, mt); // Use original Hebrew and MT for cosine semantic comparison.
+ console.log(`[ScorePair] Cosine score: ${cos}`);
 
  // Tune weights if you like, ensuring they sum to 1 if desired
  const blended = 0.6 * bleu + 0.4 * cos;
+ console.log(`[ScorePair] Blended score: ${blended}`);
 
  return {
   mt,
@@ -154,3 +173,4 @@ async function runDemo() {
 // Make sure .env.local has OPENAI_API_KEY
 // runDemo();
 ----------------------------------------------------------------------- */
+
