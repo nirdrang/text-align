@@ -37,7 +37,7 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
             onClick={() => onSelect(index)}
             className={cn(
                 'p-3 rounded-md cursor-pointer transition-all duration-150 ease-in-out border', // Base styles
-                'text-sm leading-relaxed', // Text styling
+                'text-xs leading-relaxed', // Reduced font size to text-xs
                 isSelected
                     ? 'ring-2 ring-primary ring-offset-2 bg-primary/10 shadow-inner' // Selected style
                     : 'bg-card hover:bg-secondary/60', // Default and hover style

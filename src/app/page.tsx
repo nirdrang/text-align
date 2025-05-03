@@ -15,6 +15,18 @@ import { useToast } from '@/hooks/use-toast';
 const ENGLISH_URL_STORAGE_KEY = 'text-aligner-english-url';
 const HEBREW_URL_STORAGE_KEY = 'text-aligner-hebrew-url';
 
+// Function to split text into paragraphs based on double newlines
+// Consistent with the logic expected by the AI flow
+const splitTextIntoParagraphs = (text: string | null): string[] => {
+    if (!text) return [];
+    // Split by two or more newline characters (\n\n, \n\n\n, etc.), potentially surrounded by whitespace.
+    // Filter out empty strings resulting from multiple splits or leading/trailing breaks.
+    return text.split(/\s*\n{2,}\s*/)
+               .map(p => p.trim()) // Trim whitespace from each potential paragraph
+               .filter(p => p.length > 0); // Keep only non-empty paragraphs
+};
+
+
 export default function Home() {
   const [englishUrl, setEnglishUrl] = useState('');
   const [hebrewUrl, setHebrewUrl] = useState('');
@@ -72,26 +84,21 @@ export default function Home() {
   };
 
 
-  // Split text into paragraphs based on double line breaks. Internal single newlines are preserved.
+  // Split text into paragraphs using the consistent function
   const englishParagraphs = useMemo(() => {
-      if (!englishText) return [];
-      // Split by two or more newline characters (\n\n, \n\n\n, etc.), potentially surrounded by whitespace.
-      const paragraphs = englishText.split(/\s*\n{2,}\s*/).filter(p => p.trim().length > 0);
-      console.log(`[Page] Generated ${paragraphs.length} English paragraphs from text length ${englishText.length}.`);
-      // Log first few chars of each paragraph for debugging
-      // paragraphs.forEach((p, i) => console.log(`  Eng Para ${i}: "${p.substring(0, 50)}..."`));
+      const paragraphs = splitTextIntoParagraphs(englishText);
+      console.log(`[Page] Generated ${paragraphs.length} English paragraphs.`);
+      // paragraphs.forEach((p, i) => console.log(`  Eng Para ${i} (len ${p.length}): "${p.substring(0, 50)}..."`));
       return paragraphs;
   }, [englishText]);
 
   const hebrewParagraphs = useMemo(() => {
-      if (!hebrewText) return [];
-       // Same splitting logic for Hebrew text.
-       const paragraphs = hebrewText.split(/\s*\n{2,}\s*/).filter(p => p.trim().length > 0);
-       console.log(`[Page] Generated ${paragraphs.length} Hebrew paragraphs from text length ${hebrewText.length}.`);
-       // Log first few chars of each paragraph for debugging
-       // paragraphs.forEach((p, i) => console.log(`  Heb Para ${i}: "${p.substring(0, 50)}..."`));
-       return paragraphs;
+      const paragraphs = splitTextIntoParagraphs(hebrewText);
+      console.log(`[Page] Generated ${paragraphs.length} Hebrew paragraphs.`);
+      // paragraphs.forEach((p, i) => console.log(`  Heb Para ${i} (len ${p.length}): "${p.substring(0, 50)}..."`));
+      return paragraphs;
   }, [hebrewText]);
+
 
   const textsAreLoaded = englishText !== null && hebrewText !== null;
   const controlsDisabled = !textsAreLoaded || isFetching || isSuggesting;
@@ -123,8 +130,8 @@ export default function Home() {
         fetchTextFromUrl(hebrewUrl),
       ]);
       console.log('[Page] Fetches completed.');
-      // console.log('[Page] English Result:', englishResult); // Less verbose log
-      // console.log('[Page] Hebrew Result:', hebrewResult);
+      // console.log('[Page] English Result Raw:', englishResult); // Log raw results for debugging
+      // console.log('[Page] Hebrew Result Raw:', hebrewResult);
 
 
       let hasError = false;
@@ -135,7 +142,7 @@ export default function Home() {
         setEnglishText(''); // Set to empty string on error to indicate load attempt failed but allow UI to render
         hasError = true;
       } else {
-        console.log(`[Page] Setting English text (length: ${englishResult.text.length})`);
+        console.log(`[Page] Setting English text (raw length: ${englishResult.text.length})`);
         setEnglishText(englishResult.text);
       }
 
@@ -146,7 +153,7 @@ export default function Home() {
          setHebrewText(''); // Set to empty string on error
         hasError = true;
       } else {
-         console.log(`[Page] Setting Hebrew text (length: ${hebrewResult.text.length})`);
+         console.log(`[Page] Setting Hebrew text (raw length: ${hebrewResult.text.length})`);
         setHebrewText(hebrewResult.text);
       }
 
@@ -254,35 +261,34 @@ export default function Home() {
 
     try {
        console.log('[Page] Calling suggestParagraphAlignment flow...');
-       // Pass the *original* fetched texts to the AI, not the split paragraphs
-       // The AI flow should ideally handle its own paragraph splitting based on the prompt
+       // Pass the *original* fetched texts (as received from fetchTextFromUrl) to the AI.
+       // The AI flow is expected to handle its own paragraph splitting based on the prompt instructions (using double newlines).
        const inputPayload = {
-         englishText: englishText || '',
-         hebrewText: hebrewText || ''
+         englishText: englishText || '', // Pass the raw fetched text
+         hebrewText: hebrewText || ''   // Pass the raw fetched text
        };
-       console.log(`[Page] Payload for AI: Eng length ${inputPayload.englishText.length}, Heb length ${inputPayload.hebrewText.length}`);
+       console.log(`[Page] Payload for AI: Eng raw length ${inputPayload.englishText.length}, Heb raw length ${inputPayload.hebrewText.length}`);
 
       const suggestions = await suggestParagraphAlignment(inputPayload);
        console.log('[Page] Received suggestions from AI:', suggestions);
 
-       // Get current paragraph counts for validation
+       // Get current paragraph counts (based on frontend splitting) for validation
        const currentEnglishParagraphCount = englishParagraphs.length;
        const currentHebrewParagraphCount = hebrewParagraphs.length;
        console.log(`[Page] Current paragraph counts for validation: Eng=${currentEnglishParagraphCount}, Heb=${currentHebrewParagraphCount}`);
 
-      // Filter suggestions to only include valid paragraph indices based on the *current* split
+      // Filter suggestions to only include valid paragraph indices based on the *frontend's current paragraph split*
        const validSuggestions = suggestions.filter(s =>
             s.englishParagraphIndex >= 0 && s.englishParagraphIndex < currentEnglishParagraphCount &&
             s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < currentHebrewParagraphCount
        );
         if (validSuggestions.length !== suggestions.length) {
-            console.warn(`[Page] Filtered out ${suggestions.length - validSuggestions.length} invalid suggestions (out of bounds indices).`);
-            suggestions.forEach(s => {
-                 if (!(s.englishParagraphIndex >= 0 && s.englishParagraphIndex < currentEnglishParagraphCount)) {
-                    console.warn(`  Invalid English index: ${s.englishParagraphIndex} (max: ${currentEnglishParagraphCount - 1})`);
-                 }
-                 if (!(s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < currentHebrewParagraphCount)) {
-                     console.warn(`  Invalid Hebrew index: ${s.hebrewParagraphIndex} (max: ${currentHebrewParagraphCount - 1})`);
+            console.warn(`[Page] Filtered out ${suggestions.length - validSuggestions.length} invalid suggestions (indices out of bounds based on frontend paragraph split).`);
+            suggestions.forEach((s, idx) => {
+                 const isEngValid = s.englishParagraphIndex >= 0 && s.englishParagraphIndex < currentEnglishParagraphCount;
+                 const isHebValid = s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < currentHebrewParagraphCount;
+                 if (!isEngValid || !isHebValid) {
+                    console.warn(`  Suggestion ${idx}: EngIdx=${s.englishParagraphIndex} (Valid: ${isEngValid}, Max: ${currentEnglishParagraphCount - 1}), HebIdx=${s.hebrewParagraphIndex} (Valid: ${isHebValid}, Max: ${currentHebrewParagraphCount - 1})`);
                  }
             });
         }
@@ -297,7 +303,8 @@ export default function Home() {
        console.log('[Page] Suggestion process finished.');
       setIsSuggesting(false);
     }
-  }, [englishText, hebrewText, toast, englishParagraphs.length, hebrewParagraphs.length]); // Re-run if paragraph counts change
+    // Depend on the raw texts and the derived paragraph counts
+  }, [englishText, hebrewText, toast, englishParagraphs.length, hebrewParagraphs.length]);
 
 
   // --- Paragraph Selection and Highlighting ---
