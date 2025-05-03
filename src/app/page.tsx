@@ -26,7 +26,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
     };
  }
 
- // Function to normalize punctuation within a text string
+ // Function to normalize punctuation within a text string (for English and general cases)
  function normalizePunctuation(text: string): string {
      // Replace various dash types with a standard hyphen-minus
      let normalized = text.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-');
@@ -46,15 +46,73 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
      return normalized.trim(); // Trim leading/trailing whitespace
  }
 
+// Hebrew-specific normalization based on user provided logic
+const HEB_PUNCT: Record<string, string> = {
+    "־": "-",      // maqaf  → hyphen‑minus
+    "–": "-", "—": "-",  // EN & EM dashes (for completeness)
+    "״": '"',      // gershayim  (U+05F4)  → double quote
+    // "״": '"',   // Duplicate removed
+    "׳": "'",      // geresh      (U+05F3)  → apostrophe
+    "“": '"', "”": '"',  // curly quotes, just in case
+    "‘": "'", "’": "'",
+    "«": '"', "»": '"',
+    "…": "...",
+    "‎": "", "‏": "",    // LRM/RLM (bidi markers) → drop
+    // "־": "-",    // Duplicate removed
+    "׀": "|",      // Paseq → vertical bar (rare)
+    "׃": ":",      // Sof Pasuq (Hebrew full stop) → colon
+    "׆": ";",      // Nun Hafukha → semicolon (very rare)
+};
 
- function parseParagraphs(text: string | null): string[] {
+// Create regex dynamically from the keys of HEB_PUNCT
+const PUNCT_RE = new RegExp(Object.keys(HEB_PUNCT).map(k => k.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')).join("|"), "g"); // Escape regex special chars
+// Hebrew vowel / cantillation marks (Nikud + Te'amim)
+const POINTS_RE = /[\u0591-\u05C7]/g;
+
+function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): string {
+    /**
+     * • Replace Hebrew punctuation with ASCII equivalents
+     * • Optionally strip vowel‑points & cantillation
+     * • Collapse whitespace
+     */
+    let t = text;
+    // JS strings are generally NFC, explicit normalization often not needed unless source is suspect.
+    // t = t.normalize("NFC");
+
+    // drop Nikud / Ta'amim if caller requests
+    if (!keep_nikud) {
+        t = t.replace(POINTS_RE, "");
+    }
+
+    // map punctuation using the regex and lookup table
+    t = t.replace(PUNCT_RE, (match) => HEB_PUNCT[match] || match); // Use lookup, default to original char if somehow not found
+
+    // Apply general normalization rules as well (like whitespace collapse, standard quotes if missed)
+    // Re-apply the general rules AFTER Hebrew-specific rules
+    t = normalizePunctuation(t); // Reuse the general normalizer for common rules
+
+    // Re-collapse whitespace potentially introduced by normalizePunctuation
+    t = t.replace(/\s+/g, " ");
+
+    return t.trim();
+}
+
+
+ function parseParagraphs(text: string | null, language: 'english' | 'hebrew'): string[] {
      if (!text) return [];
      // Split by double newline to separate paragraphs. Corrected regex: Use double backslashes for \n and \s
      // Updated regex to split by two or more newline characters, optionally surrounded by whitespace.
      return text.split(/(?:\s*\n\s*){2,}/)
          .map(paragraph => paragraph.trim()) // Trim whitespace first
          .filter(paragraph => paragraph !== '') // Filter empty paragraphs
-         .map(normalizePunctuation); // Normalize punctuation for each non-empty paragraph
+         .map(paragraph => { // Apply normalization based on language
+              if (language === 'hebrew') {
+                 // Keep Nikud for display by default? Let's strip for processing consistency based on user example
+                 return normalizeHebrewPunctuation(paragraph, false);
+              } else {
+                 return normalizePunctuation(paragraph); // Use general normalizer for English
+              }
+         });
  }
 
 
@@ -202,11 +260,13 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              setEnglishText(fetchedEnglish); // Store raw fetched text
              setHebrewText(fetchedHebrew);   // Store raw fetched text
 
-             // Parse paragraphs and assign original indices - this now includes normalization
-             const englishParagraphs = parseParagraphs(fetchedEnglish);
-             const hebrewParagraphs = parseParagraphs(fetchedHebrew);
+             // Parse paragraphs and assign original indices - applying language-specific normalization
+             const englishParagraphs = parseParagraphs(fetchedEnglish, 'english');
+             const hebrewParagraphs = parseParagraphs(fetchedHebrew, 'hebrew');
              const englishParagraphsWithIndices = assignOriginalIndices(englishParagraphs);
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
+             console.log(`[Normalization] Parsed English Paragraphs (first 1):`, englishParagraphsWithIndices[0]?.paragraph.substring(0, 100));
+             console.log(`[Normalization] Parsed Hebrew Paragraphs (first 1):`, hebrewParagraphsWithIndices[0]?.paragraph.substring(0, 100));
 
               // Automatically identify and hide metadata paragraphs *only if hiddenIndices is currently empty*
              const newHiddenIndices = {
@@ -988,4 +1048,3 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          </div>
      );
  }
-
