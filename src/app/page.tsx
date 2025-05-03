@@ -26,11 +26,35 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
     };
  }
 
+ // Function to normalize punctuation within a text string
+ function normalizePunctuation(text: string): string {
+     // Replace various dash types with a standard hyphen-minus
+     let normalized = text.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-');
+     // Replace various quote types with standard single and double quotes
+     normalized = normalized.replace(/[\u2018\u2019\u201A\u201B\u2039\u203A]/g, "'"); // Different single quotes/guillemets to apostrophe
+     normalized = normalized.replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/g, '"'); // Different double quotes/guillemets to standard double quote
+     // Replace ellipsis variants with standard three dots
+     normalized = normalized.replace(/\u2026/g, '...');
+     // Optionally: Remove extra whitespace around punctuation (e.g., space before comma/period)
+     normalized = normalized.replace(/\s+([.,;!?:%])/g, '$1'); // Remove space before these punctuation marks
+     // Optionally: Ensure space after punctuation where appropriate (e.g., after comma/period if not followed by another punctuation or end of string)
+     normalized = normalized.replace(/([.,;!?:%])(?=[^\s.,;!?:%])/g, '$1 '); // Add space after if followed by non-space/non-punctuation
+     // Normalize whitespace (multiple spaces/newlines to single space)
+     // Keep double newlines for paragraph breaks distinct from single newlines within paragraphs
+     normalized = normalized.replace(/([^\n])\n([^\n])/g, '$1 $2'); // Replace single newlines within text with spaces
+     normalized = normalized.replace(/ +/g, ' '); // Collapse multiple spaces to one
+     return normalized.trim(); // Trim leading/trailing whitespace
+ }
+
+
  function parseParagraphs(text: string | null): string[] {
      if (!text) return [];
      // Split by double newline to separate paragraphs. Corrected regex: Use double backslashes for \n and \s
      // Updated regex to split by two or more newline characters, optionally surrounded by whitespace.
-     return text.split(/(?:\s*\n\s*){2,}/).filter(paragraph => paragraph.trim() !== '');
+     return text.split(/(?:\s*\n\s*){2,}/)
+         .map(paragraph => paragraph.trim()) // Trim whitespace first
+         .filter(paragraph => paragraph !== '') // Filter empty paragraphs
+         .map(normalizePunctuation); // Normalize punctuation for each non-empty paragraph
  }
 
 
@@ -174,13 +198,13 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
 
 
          try {
-             const [english, hebrew] = await fetchTexts(urlToFetchEng, urlToFetchHeb);
-             setEnglishText(english);
-             setHebrewText(hebrew);
+             const [fetchedEnglish, fetchedHebrew] = await fetchTexts(urlToFetchEng, urlToFetchHeb);
+             setEnglishText(fetchedEnglish); // Store raw fetched text
+             setHebrewText(fetchedHebrew);   // Store raw fetched text
 
-             // Parse paragraphs and assign original indices
-             const englishParagraphs = parseParagraphs(english);
-             const hebrewParagraphs = parseParagraphs(hebrew);
+             // Parse paragraphs and assign original indices - this now includes normalization
+             const englishParagraphs = parseParagraphs(fetchedEnglish);
+             const hebrewParagraphs = parseParagraphs(fetchedHebrew);
              const englishParagraphsWithIndices = assignOriginalIndices(englishParagraphs);
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
 
@@ -193,6 +217,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              // Only auto-hide if the sets were initially empty (i.e., first load or after reset)
              if (hiddenIndices.english.size === 0 && hiddenIndices.hebrew.size === 0) {
                  englishParagraphsWithIndices.forEach(item => {
+                     // Use the already normalized paragraph for word count
                      const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
                      if (wordCount <= 20) { // Identify metadata (short paragraphs)
                          newHiddenIndices.english.add(item.originalIndex);
@@ -200,6 +225,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                      }
                  });
                  hebrewParagraphsWithIndices.forEach(item => {
+                      // Use the already normalized paragraph for word count
                      const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
                      if (wordCount <= 20) { // Identify metadata (short paragraphs)
                           newHiddenIndices.hebrew.add(item.originalIndex);
@@ -440,7 +466,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              const { suggestParagraphAlignment } = await import('@/ai/flows/suggest-paragraph-alignment');
 
              // Create the texts with double newlines as expected by the AI prompt
-             // Use ORIGINAL paragraphs for the AI
+             // Use ORIGINAL paragraphs (already normalized) for the AI
              const englishTextForAI = processedParagraphs.english.original.map(p => p.paragraph).join('\n\n');
              const hebrewTextForAI = processedParagraphs.hebrew.original.map(p => p.paragraph).join('\n\n');
              console.log(`Sending text to AI: Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
@@ -602,7 +628,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
             const targetParagraph = displayedHebrew[displayedIndex - 1];
             const sourceParagraph = displayedHebrew[displayedIndex];
 
-            // Create the merged paragraph text
+            // Create the merged paragraph text (using original, non-normalized text for merging if needed, or just concatenate normalized)
+            // Concatenate the already normalized paragraphs
             const mergedText = `${targetParagraph.paragraph}\n\n${sourceParagraph.paragraph}`; // Add double newline between merged paragraphs
 
             // Create the new paragraph object, keeping the originalIndex of the *target* (upper) paragraph
@@ -673,7 +700,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
             const sourceParagraph = displayedHebrew[displayedIndex];
             const targetParagraph = displayedHebrew[displayedIndex + 1];
 
-            // Create the merged paragraph text
+            // Concatenate the already normalized paragraphs
             const mergedText = `${sourceParagraph.paragraph}\n\n${targetParagraph.paragraph}`; // Add double newline
 
             // Create the new paragraph object, keeping the originalIndex of the *source* (upper) paragraph
