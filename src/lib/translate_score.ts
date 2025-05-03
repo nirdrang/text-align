@@ -17,9 +17,10 @@ export interface Scored extends Pair {
 }
 
 async function translateToHebrew(text: string): Promise<string> {
+ console.log(`[OpenAI] Attempting to translate text: "${text.substring(0, 50)}..."`); // Log before call
  try {
   const chat = await openai.chat.completions.create({
-  model: "gpt-4.1-nano", // or gpt‑3.5‑turbo
+  model: "gpt-4o-mini", // or gpt‑3.5‑turbo
   temperature: 0,
   messages: [
   {
@@ -29,9 +30,11 @@ async function translateToHebrew(text: string): Promise<string> {
   { role: "user", content: text }
   ]
   });
-  return chat.choices[0].message.content!.trim();
+  const translation = chat.choices[0].message.content!.trim();
+  console.log(`[OpenAI] Successfully received translation: "${translation.substring(0, 50)}..."`); // Log success
+  return translation;
  } catch (error) {
-   console.error("Error translating to Hebrew:", error);
+   console.error("[OpenAI] Error translating to Hebrew:", error); // Log error
    // Decide how to handle OpenAI errors, maybe return an empty string or throw
    return "[Translation Error]";
  }
