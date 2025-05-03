@@ -2,16 +2,16 @@
 "use client";
 
  import { useState, useEffect, useRef, useCallback } from 'react';
- import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'; // Removed Button from here
- import { Label } from '@/components/ui/label'; // Import Label separately if needed
- import { Input } from '@/components/ui/input'; // Import Input separately if needed
- import { Button } from '@/components/ui/button'; // Import Button from correct path
+ import { Card, CardContent, CardHeader } from '@/components/ui/card';
+ import { Label } from '@/components/ui/label';
+ import { Input } from '@/components/ui/input';
+ import { Button } from '@/components/ui/button';
  import { Loader2, DownloadCloud } from 'lucide-react';
- import { useDebounce } from '@/hooks/use-debounce';
+ import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path might still be needed if the file structure differs
  import { fetchTexts } from '@/lib/api';
  import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
- import { useLocalStorage } from '@/hooks/use-local-storage'; // Import useLocalStorage
+ import { useLocalStorage } from '@/hooks/use-local-storage'; // Re-import useLocalStorage
 
  function parseParagraphs(text: string | null): string[] {
      if (!text) return [];
@@ -28,8 +28,8 @@
  }
 
  export default function Home() {
-     const [englishUrl, setEnglishUrl] = useLocalStorage('englishUrl', ''); // Use useLocalStorage
-     const [hebrewUrl, setHebrewUrl] = useLocalStorage('hebrewUrl', ''); // Use useLocalStorage
+     const [englishUrl, setEnglishUrl] = useLocalStorage('englishUrl', ''); // Use useLocalStorage again
+     const [hebrewUrl, setHebrewUrl] = useLocalStorage('hebrewUrl', ''); // Use useLocalStorage again
      const [englishText, setEnglishText] = useState<string | null>(null);
      const [hebrewText, setHebrewText] = useState<string | null>(null);
      const [isFetching, setIsFetching] = useState(false);
@@ -162,18 +162,26 @@
 
          if (language === 'english') {
             newSelectedEnglishIndex = originalIndex;
-            newSelectedHebrewIndex = null; // Clear Hebrew selection
-            // Check if there's a selected Hebrew paragraph to link with
+            // Only clear Hebrew selection if it wasn't already linked to this English selection
+            const existingLink = manualAlignments.find(link => link.englishIndex === originalIndex);
+            if (!existingLink || selectedHebrewIndex !== existingLink.hebrewIndex) {
+                newSelectedHebrewIndex = null;
+            }
+            // Check if there's a selected Hebrew paragraph to potentially link with
             const hebIndexSelected = selectedHebrewIndex !== null;
-            newCanLink = hebIndexSelected;
-            newCanUnlink = manualAlignments.some(link => link.englishIndex === originalIndex);
+            newCanLink = hebIndexSelected && !existingLink; // Can link if Hebrew is selected AND not already linked
+            newCanUnlink = !!existingLink; // Can unlink if already linked
          } else { // language === 'hebrew'
             newSelectedHebrewIndex = originalIndex;
-            newSelectedEnglishIndex = null; // Clear English selection
-            // Check if there's a selected English paragraph to link with
+             // Only clear English selection if it wasn't already linked to this Hebrew selection
+            const existingLink = manualAlignments.find(link => link.hebrewIndex === originalIndex);
+            if (!existingLink || selectedEnglishIndex !== existingLink.englishIndex) {
+                newSelectedEnglishIndex = null;
+            }
+             // Check if there's a selected English paragraph to potentially link with
             const engIndexSelected = selectedEnglishIndex !== null;
-            newCanLink = engIndexSelected;
-            newCanUnlink = manualAlignments.some(link => link.hebrewIndex === originalIndex);
+            newCanLink = engIndexSelected && !existingLink; // Can link if English is selected AND not already linked
+            newCanUnlink = !!existingLink; // Can unlink if already linked
          }
 
          setSelectedEnglishIndex(newSelectedEnglishIndex);
@@ -186,22 +194,33 @@
 
      const handleLink = () => {
          if (selectedEnglishIndex !== null && selectedHebrewIndex !== null) {
-             const newAlignment: ManualAlignment = {
-                 englishIndex: selectedEnglishIndex,
-                 hebrewIndex: selectedHebrewIndex,
-             };
-             setManualAlignments([...manualAlignments, newAlignment]);
-             // Clear selections after linking
-             setSelectedEnglishIndex(null);
-             setSelectedHebrewIndex(null);
-             setCanLink(false);
-             setCanUnlink(false);
-             setControlsDisabled(true);
+             // Prevent linking if either paragraph is already part of another link
+             const alreadyLinked = manualAlignments.some(
+                 link => link.englishIndex === selectedEnglishIndex || link.hebrewIndex === selectedHebrewIndex
+             );
+
+             if (!alreadyLinked) {
+                 const newAlignment: ManualAlignment = {
+                     englishIndex: selectedEnglishIndex,
+                     hebrewIndex: selectedHebrewIndex,
+                 };
+                 setManualAlignments([...manualAlignments, newAlignment]);
+                 // Clear selections after linking
+                 setSelectedEnglishIndex(null);
+                 setSelectedHebrewIndex(null);
+                 setCanLink(false);
+                 setCanUnlink(false);
+                 setControlsDisabled(true);
+             } else {
+                 console.warn("Cannot link: One or both paragraphs are already linked.");
+                 // Optionally show a toast message to the user
+             }
          }
      };
 
+
       const handleUnlink = () => {
-         // Determine which index is currently selected (only one can be)
+         // Determine which index is currently selected (only one can be effectively selected for unlinking at a time)
          const indexToUnlink = selectedEnglishIndex !== null ? selectedEnglishIndex : selectedHebrewIndex;
          const keyToFilter = selectedEnglishIndex !== null ? 'englishIndex' : 'hebrewIndex';
 
@@ -265,10 +284,14 @@
              // Reset controls state based on current selection (if any)
              const engSelected = selectedEnglishIndex !== null;
              const hebSelected = selectedHebrewIndex !== null;
-             setCanLink(engSelected && hebSelected); // Can only link if one of each is selected (which isn't possible with current selection logic)
+             // Can link if one of each selected and *neither* is already linked elsewhere
+             const engAlreadyLinked = engSelected && manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
+             const hebAlreadyLinked = hebSelected && manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
+             setCanLink(engSelected && hebSelected && !engAlreadyLinked && !hebAlreadyLinked);
+             // Can unlink if the selected one is linked
              const engCanUnlink = engSelected && manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
              const hebCanUnlink = hebSelected && manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
-             setCanUnlink(engCanUnlink || hebCanUnlink); // Can unlink if the selected one is linked
+             setCanUnlink(engCanUnlink || hebCanUnlink);
              setControlsDisabled(!(canLink || canUnlink)); // Enable if link/unlink possible
          }
      };
@@ -434,6 +457,9 @@
          <div className="flex flex-col h-screen p-4 bg-background">
              {/* URL Input Section - Reduced Size */}
              <Card className="mb-4 shadow-sm">
+                 <CardHeader className="py-2 px-3 border-b"> {/* Optional: Add header for visual separation */}
+                     {/* Optionally add a title like <CardTitle className="text-sm">Load Texts</CardTitle> */}
+                 </CardHeader>
                  <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 items-end">
                      <div className="space-y-1">
                          <Label htmlFor="english-url" className="text-xs">English URL</Label>
@@ -485,7 +511,7 @@
                          displayedParagraphs={processedParagraphs.english.displayed}
                          isLoading={isFetching && englishText === null}
                          selectedOriginalIndex={selectedEnglishIndex}
-                         onParagraphSelect={(idx) => handleParagraphSelect(idx, 'english')}
+                         onParagraphSelect={handleParagraphSelect} // Pass the updated handler
                          manualAlignments={manualAlignments}
                          alignmentKey="englishIndex"
                          suggestedAlignments={suggestedAlignments}
@@ -495,7 +521,7 @@
                          isSourceLanguage={true}
                          loadedText={englishText}
                          language="english"
-                         onDropParagraph={(idx) => handleDropParagraph(idx, 'english')}
+                         onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.english}
                          panelRef={englishPanelRef} // Pass ref
                      />
@@ -508,7 +534,7 @@
                          displayedParagraphs={processedParagraphs.hebrew.displayed}
                          isLoading={isFetching && hebrewText === null}
                          selectedOriginalIndex={selectedHebrewIndex}
-                         onParagraphSelect={(idx) => handleParagraphSelect(idx, 'hebrew')}
+                         onParagraphSelect={handleParagraphSelect} // Pass the updated handler
                          manualAlignments={manualAlignments}
                          alignmentKey="hebrewIndex"
                          suggestedAlignments={suggestedAlignments}
@@ -527,7 +553,7 @@
                          isSourceLanguage={false}
                          loadedText={hebrewText}
                          language="hebrew"
-                         onDropParagraph={(idx) => handleDropParagraph(idx, 'hebrew')}
+                         onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.hebrew}
                          panelRef={hebrewPanelRef} // Pass ref
                      />
@@ -536,3 +562,4 @@
          </div>
      );
  }
+
