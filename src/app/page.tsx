@@ -7,13 +7,14 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Label } from '@/components/ui/label';
  import { Input } from '@/components/ui/input';
  import { Button } from '@/components/ui/button'; // Import Button
- import { Loader2, DownloadCloud } from 'lucide-react';
+ import { Loader2, DownloadCloud, Check, Plus } from 'lucide-react'; // Added Check, Plus
  import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path
  import { fetchTexts } from '@/lib/api';
  import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
  import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast'; // Import useToast
+import { saveAs } from 'file-saver'; // Import file-saver
 
 // Throttling function
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
@@ -27,7 +28,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
     };
  }
 
- // Function to normalize punctuation within a text string (for English and general cases)
+ // Function to normalize punctuation within a text string (for general cases, NOT used for English)
  function normalizePunctuation(text: string): string {
      // Replace various dash types with a standard hyphen-minus
      let normalized = text.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, '-');
@@ -90,10 +91,9 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
     // Apply general normalization rules as well (like whitespace collapse, standard quotes if missed)
     // Re-apply the general rules AFTER Hebrew-specific rules
-    t = normalizePunctuation(t); // Reuse the general normalizer for common rules
-
     // Re-collapse whitespace potentially introduced by normalizePunctuation
-    t = t.replace(/\s+/g, " ");
+    t = t.replace(/\s+/g, " "); // Collapse multiple spaces/tabs/newlines to one space
+
 
     return t.trim();
 }
@@ -111,17 +111,22 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
               let normalizedParagraph: string;
 
               if (language === 'hebrew') {
-                 // Keep Nikud for display by default? Let's strip for processing consistency based on user example
-                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true); // Keep Nikud
+                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true); // Keep Nikud by default
                  // Log if normalization changed the text
                  if (originalParagraph !== normalizedParagraph) {
                     console.log(`[Normalization] Hebrew Paragraph ${index + 1} Normalized:`);
-                    // console.log("  Before:", originalParagraph); // Uncomment for detailed debugging
-                    // console.log("  After: ", normalizedParagraph); // Uncomment for detailed debugging
+                    console.log("  Before:", originalParagraph.substring(0, 100) + (originalParagraph.length > 100 ? "..." : "")); // Log first 100 chars
+                    console.log("  After: ", normalizedParagraph.substring(0, 100) + (normalizedParagraph.length > 100 ? "..." : "")); // Log first 100 chars
                  }
               } else {
                  // English text is treated as ground truth, no normalization applied
                  normalizedParagraph = originalParagraph;
+                  // Log if normalization changed the text (shouldn't happen now)
+                 if (originalParagraph !== normalizedParagraph) {
+                    console.log(`[Normalization] English Paragraph ${index + 1} WAS Normalized (This should not happen):`);
+                    console.log("  Before:", originalParagraph);
+                    console.log("  After: ", normalizedParagraph);
+                 }
               }
               return normalizedParagraph;
          });
@@ -161,13 +166,16 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      });
      const [selectedEnglishIndex, setSelectedEnglishIndex] = useState<number | null>(null);
      const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
-     const [manualAlignments, setManualAlignments] = useLocalStorage<ManualAlignment[]>('manualAlignments', []); // Persist manual alignments
+     // State for storing confirmed JSONL records
+     const [jsonlRecords, setJsonlRecords] = useLocalStorage<string[]>('jsonlRecords', []);
+     // Manual alignments are no longer used for linking state, kept for reference if needed later or remove fully
+     const [manualAlignments, setManualAlignments] = useLocalStorage<ManualAlignment[]>('manualAlignments', []);
      const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
      const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
      const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
      const [isSuggesting, setIsSuggesting] = useState(false);
-     const [canLink, setCanLink] = useState(false);
-     const [canUnlink, setCanUnlink] = useState(false);
+     const [canConfirmPair, setCanConfirmPair] = useState(false); // Renamed from canLink
+     const [canUnlink, setCanUnlink] = useState(false); // Unlinking might be removed or repurposed
      const [controlsDisabled, setControlsDisabled] = useState(true);
      const [hiddenIndices, setHiddenIndices] = useLocalStorage<{ // Persist hidden indices
          english: Set<number>;
@@ -178,6 +186,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      });
      // Add state for scroll sync preference, persisted in localStorage
      const [isScrollSyncEnabled, setIsScrollSyncEnabled] = useLocalStorage('isScrollSyncEnabled', true);
+     const [isDownloading, setIsDownloading] = useState(false); // State for download button
+
 
      const englishPanelRef = useRef<HTMLDivElement>(null);
      const hebrewPanelRef = useRef<HTMLDivElement>(null);
@@ -199,13 +209,13 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
      // Effect to rehydrate persisted state on client mount
      useEffect(() => {
-         // Rehydrate manual alignments
-         const storedManualAlignments = localStorage.getItem('manualAlignments');
-         if (storedManualAlignments) {
+         // Rehydrate JSONL records
+         const storedJsonlRecords = localStorage.getItem('jsonlRecords');
+         if (storedJsonlRecords) {
              try {
-                 setManualAlignments(JSON.parse(storedManualAlignments));
+                 setJsonlRecords(JSON.parse(storedJsonlRecords));
              } catch (e) {
-                 console.error("Failed to parse stored manual alignments:", e);
+                 console.error("Failed to parse stored JSONL records:", e);
              }
          }
 
@@ -260,11 +270,13 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setEnglishText(null); // Reset text state
          setHebrewText(null); // Reset text state
          setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } }); // Reset paragraphs
-         setManualAlignments([]); // Reset alignments for new text
+         // Optionally clear JSONL records for new text, or keep them cumulative? Let's keep them for now.
+         // setJsonlRecords([]);
          setSuggestedAlignments(null);
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
-         // Don't reset hidden indices here, let them persist unless user explicitly resets
+         // Reset hidden indices for new text fetch
+         setHiddenIndices({ english: new Set(), hebrew: new Set() });
 
 
          try {
@@ -279,39 +291,30 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
              console.log(`[Post-Normalization] Parsed English Paragraphs Count: ${englishParagraphsWithIndices.length}`);
              console.log(`[Post-Normalization] Parsed Hebrew Paragraphs Count: ${hebrewParagraphsWithIndices.length}`);
-             // Optionally log first few normalized paragraphs for verification
-             // console.log(`[Post-Normalization] First English Paragraph:`, englishParagraphsWithIndices[0]?.paragraph.substring(0, 100));
-             // console.log(`[Post-Normalization] First Hebrew Paragraph:`, hebrewParagraphsWithIndices[0]?.paragraph.substring(0, 100));
 
-
-              // Automatically identify and hide metadata paragraphs *only if hiddenIndices is currently empty*
+              // Automatically identify and hide metadata paragraphs
              const newHiddenIndices = {
-                 english: new Set(hiddenIndices.english), // Start with persisted/current hidden indices
-                 hebrew: new Set(hiddenIndices.hebrew),
+                 english: new Set<number>(),
+                 hebrew: new Set<number>(),
              };
 
-             // Only auto-hide if the sets were initially empty (i.e., first load or after reset)
-             if (hiddenIndices.english.size === 0 && hiddenIndices.hebrew.size === 0) {
-                 englishParagraphsWithIndices.forEach(item => {
-                     // Use the *original* (non-normalized) paragraph for word count on English side
-                     const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                     if (wordCount <= 20) { // Identify metadata (short paragraphs)
-                         newHiddenIndices.english.add(item.originalIndex);
-                         console.log(`Auto-hiding English paragraph ${item.originalIndex} (short: ${wordCount} words)`);
-                     }
-                 });
-                 hebrewParagraphsWithIndices.forEach(item => {
-                      // Use the normalized paragraph for word count on Hebrew side
-                     const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                     if (wordCount <= 20) { // Identify metadata (short paragraphs)
-                          newHiddenIndices.hebrew.add(item.originalIndex);
-                          console.log(`Auto-hiding Hebrew paragraph ${item.originalIndex} (short: ${wordCount} words)`);
-                     }
-                 });
-                 setHiddenIndices(newHiddenIndices); // Update state and persist the auto-detected ones
-             } else {
-                  console.log("Skipping auto-hide for metadata as hidden indices already exist.");
-             }
+             englishParagraphsWithIndices.forEach(item => {
+                 // Use the *original* (non-normalized) paragraph for word count on English side
+                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                     newHiddenIndices.english.add(item.originalIndex);
+                     console.log(`Auto-hiding English paragraph ${item.originalIndex} (short: ${wordCount} words)`);
+                 }
+             });
+             hebrewParagraphsWithIndices.forEach(item => {
+                  // Use the normalized paragraph for word count on Hebrew side
+                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                      newHiddenIndices.hebrew.add(item.originalIndex);
+                      console.log(`Auto-hiding Hebrew paragraph ${item.originalIndex} (short: ${wordCount} words)`);
+                 }
+             });
+             setHiddenIndices(newHiddenIndices); // Update state and persist the auto-detected ones
 
 
              // Initialize with filtered paragraphs using the potentially updated hiddenIndices
@@ -331,8 +334,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              setSelectedHebrewIndex(null);
              setHighlightedSuggestionIndex(null);
              setHighlightedSuggestionTargetIndex(null);
-             setCanLink(false);
-             setCanUnlink(false);
+             setCanConfirmPair(false); // Renamed from canLink
+             setCanUnlink(false); // Unlink might be repurposed or removed
              setControlsDisabled(true); // Start with controls disabled
          } catch (error: any) {
              console.error("Failed to fetch texts:", error);
@@ -344,7 +347,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          } finally {
              setIsFetching(false);
          }
-     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setManualAlignments, setHiddenIndices, hiddenIndices.english, hiddenIndices.hebrew, toast]); // Include persisted setters and current state in deps
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setHiddenIndices, toast]); // Removed setManualAlignments from deps as it's not used for linking anymore
 
      // This useEffect runs when the debounced URLs change
      useEffect(() => {
@@ -366,14 +369,14 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
         if (language === 'english' && selectedEnglishIndex === originalIndex) {
             console.log('Deselecting English paragraph');
             setSelectedEnglishIndex(null); // Deselect the English paragraph
-            setCanLink(false);
+            setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
             return; // Exit early, no further logic needed
         } else if (language === 'hebrew' && selectedHebrewIndex === originalIndex) {
             console.log('Deselecting Hebrew paragraph');
             setSelectedHebrewIndex(null); // Deselect the Hebrew paragraph
-            setCanLink(false);
+            setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
             return; // Exit early, no further logic needed
@@ -390,136 +393,106 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
               console.log(`Hebrew paragraph ${originalIndex} selected`);
          }
 
-         // Determine if the newly selected pair can be linked
-         // Can link if one English and one Hebrew are selected, AND neither is already part of *another* link.
+         // Determine if the newly selected pair can be confirmed
+         // Can confirm if one English and one Hebrew are selected.
          const englishSelected = currentSelectedEnglish !== null;
          const hebrewSelected = currentSelectedHebrew !== null;
+         const newCanConfirmPair = englishSelected && hebrewSelected;
+         console.log(`Can Confirm Pair Check: engSel=${englishSelected}, hebSel=${hebrewSelected} -> Result=${newCanConfirmPair}`);
 
-         // Check if the English paragraph is already linked (but not to the currently selected Hebrew one)
-         const englishAlreadyLinkedToAnother = englishSelected && manualAlignments.some(
-             link => link.englishIndex === currentSelectedEnglish && link.hebrewIndex !== currentSelectedHebrew
-         );
-         // Check if the Hebrew paragraph is already linked (but not to the currently selected English one)
-         const hebrewAlreadyLinkedToAnother = hebrewSelected && manualAlignments.some(
-             link => link.hebrewIndex === currentSelectedHebrew && link.englishIndex !== currentSelectedEnglish
-         );
-         // Check if this specific pair is already linked
-         const isCurrentlyLinkedPair = manualAlignments.some(
-             link => link.englishIndex === currentSelectedEnglish && link.hebrewIndex === currentSelectedHebrew
-         );
-
-         const newCanLink = englishSelected && hebrewSelected && !englishAlreadyLinkedToAnother && !hebrewAlreadyLinkedToAnother && !isCurrentlyLinkedPair;
-         console.log(`Can Link Check: engSel=${englishSelected}, hebSel=${hebrewSelected}, engLinkedAnother=${englishAlreadyLinkedToAnother}, hebLinkedAnother=${hebrewAlreadyLinkedToAnother}, isCurrentPair=${isCurrentlyLinkedPair} -> Result=${newCanLink}`);
-
-
-         // Determine if the newly selected paragraph can be unlinked
-         // Can unlink if the selected paragraph (in either language) is part of an *existing* link.
-         let newCanUnlink = false;
-         if (language === 'english' && englishSelected) {
-             newCanUnlink = manualAlignments.some(link => link.englishIndex === currentSelectedEnglish);
-             console.log(`Can Unlink (English): Check if ${currentSelectedEnglish} is linked -> Result=${newCanUnlink}`);
-         } else if (language === 'hebrew' && hebrewSelected) {
-             newCanUnlink = manualAlignments.some(link => link.hebrewIndex === currentSelectedHebrew);
-              console.log(`Can Unlink (Hebrew): Check if ${currentSelectedHebrew} is linked -> Result=${newCanUnlink}`);
-         }
-         // If the other language's selection forms the *other* part of the link, enable unlinking too.
-         // This handles the case where you click the second item of an already linked pair.
-         if (!newCanUnlink && isCurrentlyLinkedPair) {
-             newCanUnlink = true;
-             console.log(`Can Unlink: Enabling because selected pair (${currentSelectedEnglish}, ${currentSelectedHebrew}) is already linked.`);
-         }
+         // Unlink logic might need re-evaluation based on how JSONL works.
+         // For now, let's keep it simple: can only confirm, not unlink confirmed pairs easily.
+         const newCanUnlink = false; // Disable unlinking for now
 
          // Update state
          setSelectedEnglishIndex(currentSelectedEnglish);
          setSelectedHebrewIndex(currentSelectedHebrew);
-         setCanLink(newCanLink);
+         setCanConfirmPair(newCanConfirmPair);
          setCanUnlink(newCanUnlink);
-        setControlsDisabled(!(newCanLink || newCanUnlink)); // Controls enabled if link or unlink is possible
-        console.log(`Controls state updated: canLink=${newCanLink}, canUnlink=${newCanUnlink}, disabled=${!(newCanLink || newCanUnlink)}`);
+        setControlsDisabled(!newCanConfirmPair); // Controls enabled only if pair can be confirmed
+        console.log(`Controls state updated: canConfirmPair=${newCanConfirmPair}, canUnlink=${newCanUnlink}, disabled=${!newCanConfirmPair}`);
      };
 
+     // Replaces handleLink
+     const handleConfirmPair = () => {
+         if (selectedEnglishIndex !== null && selectedHebrewIndex !== null && canConfirmPair) {
+             console.log(`Attempting to confirm pair: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}`);
 
-     const handleLink = () => {
-         if (selectedEnglishIndex !== null && selectedHebrewIndex !== null && canLink) {
-            console.log(`Attempting to link: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}`);
-             // Prevent linking if either paragraph is already part of another link
-             const alreadyLinked = manualAlignments.some(
-                 link => link.englishIndex === selectedEnglishIndex || link.hebrewIndex === selectedHebrewIndex
-             );
+             // Find the actual paragraph text using the original indices
+             const englishParaData = processedParagraphs.english.original.find(p => p.originalIndex === selectedEnglishIndex);
+             const hebrewParaData = processedParagraphs.hebrew.original.find(p => p.originalIndex === selectedHebrewIndex);
 
-             if (!alreadyLinked) {
-                 const newAlignment: ManualAlignment = {
-                     englishIndex: selectedEnglishIndex,
-                     hebrewIndex: selectedHebrewIndex,
+             if (englishParaData && hebrewParaData) {
+                const enText = englishParaData.paragraph; // Use the original, non-normalized English
+                const heText = hebrewParaData.paragraph; // Use the original, normalized Hebrew
+
+                 // Create the JSONL record string
+                 const record = {
+                     messages: [
+                         { role: 'system', content: 'Translate Rudolf Steiner lecture paragraphs from English to Hebrew.' },
+                         { role: 'user', content: enText }, // English paragraph
+                         { role: 'assistant', content: heText } // Hebrew paragraph
+                     ]
                  };
-                 setManualAlignments([...manualAlignments, newAlignment]);
-                 console.log(`Link created: ${JSON.stringify(newAlignment)}`);
-                 // Clear selections after linking
+                 const jsonlString = JSON.stringify(record);
+
+                 // Add the record to the state
+                 setJsonlRecords(prevRecords => [...prevRecords, jsonlString]);
+                 console.log(`Pair confirmed and added to JSONL records: ${jsonlString}`);
+                 toast({ title: "Pair Confirmed", description: `English paragraph ${selectedEnglishIndex + 1} and Hebrew paragraph ${selectedHebrewIndex + 1} added to export list.` });
+
+
+                 // --- Remove the confirmed paragraphs from display ---
+                 // Add their original indices to the hidden set
+                 const newHidden = {
+                     english: new Set(hiddenIndices.english).add(selectedEnglishIndex),
+                     hebrew: new Set(hiddenIndices.hebrew).add(selectedHebrewIndex)
+                 };
+                 setHiddenIndices(newHidden);
+
+                 // Recalculate displayed paragraphs
+                 setProcessedParagraphs(prev => ({
+                     english: {
+                         original: prev.english.original,
+                         displayed: filterMetadata(prev.english.original, newHidden.english),
+                     },
+                     hebrew: {
+                         original: prev.hebrew.original,
+                         displayed: filterMetadata(prev.hebrew.original, newHidden.hebrew),
+                     },
+                 }));
+                 console.log(`Removed confirmed paragraphs (Eng: ${selectedEnglishIndex}, Heb: ${selectedHebrewIndex}) from display.`);
+
+
+                 // Clear selections and button states after confirming
                  setSelectedEnglishIndex(null);
                  setSelectedHebrewIndex(null);
-                 setCanLink(false);
+                 setCanConfirmPair(false);
                  setCanUnlink(false);
                  setControlsDisabled(true);
-                 toast({ title: "Paragraphs Linked", description: `English paragraph ${selectedEnglishIndex + 1} linked to Hebrew paragraph ${selectedHebrewIndex + 1}.` });
+
              } else {
-                 console.warn("Cannot link: One or both paragraphs are already linked.");
-                 toast({ title: "Link Error", description: "One or both selected paragraphs are already linked to other paragraphs.", variant: "destructive" });
+                 console.error("Could not find paragraph data for selected indices.");
+                 toast({ title: "Confirmation Error", description: "Could not retrieve paragraph text for confirmation.", variant: "destructive" });
              }
          } else {
-            console.warn(`Link conditions not met: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}, canLink=${canLink}`);
+            console.warn(`Confirmation conditions not met: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}, canConfirm=${canConfirmPair}`);
          }
      };
 
 
+      // handleUnlink might be removed or repurposed depending on workflow
       const handleUnlink = () => {
-         // Determine which index to use for finding the link to remove.
-         // If both are selected, it implies they form the pair to be unlinked.
-         // If only one is selected, use that one to find the link.
-         const engIdx = selectedEnglishIndex;
-         const hebIdx = selectedHebrewIndex;
-         let linkToRemove: ManualAlignment | undefined;
-
-         console.log(`Attempting to unlink: Selected Eng=${engIdx}, Heb=${hebIdx}`);
-
-         if (engIdx !== null && hebIdx !== null) {
-             linkToRemove = manualAlignments.find(link => link.englishIndex === engIdx && link.hebrewIndex === hebIdx);
-             console.log(`Unlinking based on selected pair: Found link?`, linkToRemove);
-         } else if (engIdx !== null) {
-             linkToRemove = manualAlignments.find(link => link.englishIndex === engIdx);
-             console.log(`Unlinking based on selected English (${engIdx}): Found link?`, linkToRemove);
-         } else if (hebIdx !== null) {
-             linkToRemove = manualAlignments.find(link => link.hebrewIndex === hebIdx);
-             console.log(`Unlinking based on selected Hebrew (${hebIdx}): Found link?`, linkToRemove);
-         } else {
-            console.warn('Unlink clicked but no paragraph selected.');
-             toast({ title: "Unlink Error", description: "No paragraph selected to unlink.", variant: "destructive" });
-         }
-
-         if (linkToRemove) {
-             // Filter out the alignment containing the selected index/pair
-             const updatedAlignments = manualAlignments.filter(alignment => alignment !== linkToRemove);
-             setManualAlignments(updatedAlignments);
-             console.log(`Link removed: ${JSON.stringify(linkToRemove)}. New alignments count: ${updatedAlignments.length}`);
-              toast({ title: "Paragraphs Unlinked", description: `Link between English ${linkToRemove.englishIndex + 1} and Hebrew ${linkToRemove.hebrewIndex + 1} removed.` });
-
-             // Clear selections and reset button states after unlinking
-             setSelectedEnglishIndex(null);
-             setSelectedHebrewIndex(null);
-             setCanLink(false);
-             setCanUnlink(false);
-             setControlsDisabled(true);
-             console.log('Selections and button states reset after unlink.');
-         } else if (canUnlink) {
-             // This case might happen if canUnlink was true but the find logic failed,
-             // potentially due to inconsistent state. Log a warning.
-             console.warn(`Unlink clicked and 'canUnlink' was true, but no link found for selected indices (Eng=${engIdx}, Heb=${hebIdx}). Resetting state.`);
-             toast({ title: "Unlink Error", description: "Could not find the link to remove.", variant: "destructive" });
-             setSelectedEnglishIndex(null);
-             setSelectedHebrewIndex(null);
-             setCanLink(false);
-             setCanUnlink(false);
-             setControlsDisabled(true);
-         }
+         console.warn("Unlink functionality is currently disabled or under review for JSONL workflow.");
+         toast({ title: "Action Disabled", description: "Unlinking confirmed pairs is not directly supported in this workflow.", variant: "destructive" });
+         // If needed, implement logic to remove a specific record from jsonlRecords based on selection,
+         // and potentially unhide the corresponding paragraphs. This would be complex.
+         // For now, clear selections.
+         setSelectedEnglishIndex(null);
+         setSelectedHebrewIndex(null);
+         setCanConfirmPair(false);
+         setCanUnlink(false);
+         setControlsDisabled(true);
      };
 
 
@@ -543,36 +516,52 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
              // Create the texts with double newlines as expected by the AI prompt
              // Use ORIGINAL paragraphs (non-normalized English, normalized Hebrew) for the AI
-             const englishTextForAI = processedParagraphs.english.original.map(p => p.paragraph).join('\n\n');
-             const hebrewTextForAI = processedParagraphs.hebrew.original.map(p => p.paragraph).join('\n\n');
-             console.log(`Sending text to AI: Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
-             // console.log("English text for AI:\n", englishTextForAI.substring(0, 200) + "..."); // Log first 200 chars
-             // console.log("Hebrew text for AI:\n", hebrewTextForAI.substring(0, 200) + "..."); // Log first 200 chars
+             const englishTextForAI = processedParagraphs.english.original
+                                         .filter(p => !hiddenIndices.english.has(p.originalIndex)) // Filter out already hidden/confirmed
+                                         .map(p => p.paragraph).join('\n\n');
+             const hebrewTextForAI = processedParagraphs.hebrew.original
+                                         .filter(p => !hiddenIndices.hebrew.has(p.originalIndex)) // Filter out already hidden/confirmed
+                                         .map(p => p.paragraph).join('\n\n');
 
+             console.log(`Sending text to AI (excluding hidden/confirmed): Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
 
              const suggestions = await suggestParagraphAlignment({
                  englishText: englishTextForAI,
                  hebrewText: hebrewTextForAI,
              });
              console.log(`Raw AI Suggestions received: ${suggestions.length} suggestions`);
-             // console.log("Raw AI Suggestions:", JSON.stringify(suggestions));
 
              // Filter suggestions to only include those involving non-hidden paragraphs
-             // Note: The AI returns ORIGINAL indices based on the full text it received
-             const validSuggestions = suggestions.filter(s => {
-                 const isEngHidden = hiddenIndices.english.has(s.englishParagraphIndex);
-                 const isHebHidden = hiddenIndices.hebrew.has(s.hebrewParagraphIndex);
-                 if (isEngHidden || isHebHidden) {
-                      // console.log(`Filtering out suggestion: Eng(${s.englishParagraphIndex}, hidden=${isEngHidden}), Heb(${s.hebrewParagraphIndex}, hidden=${isHebHidden})`);
-                 }
-                 return !isEngHidden && !isHebHidden;
-             });
-             console.log(`Filtered AI Suggestions (visible paragraphs only): ${validSuggestions.length} suggestions`);
+             // The AI returns indices based on the *filtered* text it received.
+             // We need to map these back to the *original* indices.
+              const mapFilteredIndexToOriginal = (filteredIndex: number, language: 'english' | 'hebrew'): number | null => {
+                  const displayed = language === 'english' ? processedParagraphs.english.displayed : processedParagraphs.hebrew.displayed;
+                  if (filteredIndex >= 0 && filteredIndex < displayed.length) {
+                      return displayed[filteredIndex].originalIndex;
+                  }
+                  return null;
+              };
+
+              const validSuggestions = suggestions.map(s => {
+                   const originalEngIndex = mapFilteredIndexToOriginal(s.englishParagraphIndex, 'english');
+                   const originalHebIndex = mapFilteredIndexToOriginal(s.hebrewParagraphIndex, 'hebrew');
+
+                   if (originalEngIndex !== null && originalHebIndex !== null) {
+                       return {
+                           ...s,
+                           englishParagraphIndex: originalEngIndex,
+                           hebrewParagraphIndex: originalHebIndex,
+                       };
+                   }
+                   return null; // Invalid mapping, filter out
+               }).filter(s => s !== null) as SuggestedAlignment[]; // Type assertion after filtering nulls
+
+             console.log(`Valid AI Suggestions (mapped to original indices): ${validSuggestions.length} suggestions`);
 
              setSuggestedAlignments(validSuggestions);
               toast({ title: "AI Suggestions Ready", description: `Received ${validSuggestions.length} alignment suggestions.` });
 
-             // Clear specific highlights for single suggestion (might be redundant but safe)
+             // Clear specific highlights for single suggestion
              setHighlightedSuggestionIndex(null);
              setHighlightedSuggestionTargetIndex(null);
 
@@ -583,22 +572,16 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              setSuggestedAlignments([]); // Clear suggestions on error
          } finally {
              setIsSuggesting(false);
-             // Reset controls state based on current selection (if any) - DRY this up later
+             // Reset controls state based on current selection (if any)
             const engSelected = selectedEnglishIndex !== null;
             const hebSelected = selectedHebrewIndex !== null;
-            const engAlreadyLinked = engSelected && manualAlignments.some(link => link.englishIndex === selectedEnglishIndex && link.hebrewIndex !== selectedHebrewIndex);
-            const hebAlreadyLinked = hebSelected && manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex && link.englishIndex !== selectedEnglishIndex);
-            const isCurrentlyLinkedPair = engSelected && hebSelected && manualAlignments.some(link => link.englishIndex === selectedEnglishIndex && link.hebrewIndex === selectedHebrewIndex);
+            const currentCanConfirm = engSelected && hebSelected;
+            const currentCanUnlink = false; // Keep unlink disabled
 
-            const currentCanLink = engSelected && hebSelected && !engAlreadyLinked && !hebAlreadyLinked && !isCurrentlyLinkedPair;
-            // Can unlink if *either* selected paragraph is part of *any* existing link
-            const currentCanUnlink = (engSelected && manualAlignments.some(link => link.englishIndex === selectedEnglishIndex)) ||
-                                (hebSelected && manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex)); // Corrected: check hebSelected here
-
-             console.log(`Resetting controls after suggest: engSel=${engSelected}, hebSel=${hebSelected}, currentCanLink=${currentCanLink}, currentCanUnlink=${currentCanUnlink}`);
-             setCanLink(currentCanLink);
+             console.log(`Resetting controls after suggest: engSel=${engSelected}, hebSel=${hebSelected}, currentCanConfirm=${currentCanConfirm}, currentCanUnlink=${currentCanUnlink}`);
+             setCanConfirmPair(currentCanConfirm);
              setCanUnlink(currentCanUnlink);
-             setControlsDisabled(!(currentCanLink || currentCanUnlink));
+             setControlsDisabled(!currentCanConfirm); // Enable only if confirm is possible
          }
      };
 
@@ -648,16 +631,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              hebStillSelected = null;
          }
 
-         // Filter out manual alignments involving this paragraph
-         const updatedManualAlignments = manualAlignments.filter(alignment =>
-             !(alignment.englishIndex === originalIndex || alignment.hebrewIndex === originalIndex)
-         );
-         if (updatedManualAlignments.length < manualAlignments.length) {
-            console.log(`Removed ${manualAlignments.length - updatedManualAlignments.length} manual alignments involving hidden paragraph ${originalIndex}.`);
-            setManualAlignments(updatedManualAlignments); // Update persisted state
-         }
-
-
          // Filter out suggested alignments involving this paragraph
          const updatedSuggestedAlignments = suggestedAlignments?.filter(suggestion =>
             !(suggestion.englishParagraphIndex === originalIndex || suggestion.hebrewParagraphIndex === originalIndex)
@@ -668,24 +641,16 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
           }
 
 
-         // Recalculate button states after dropping and clearing selection/links (DRY opportunity)
+         // Recalculate button states after dropping and clearing selection
          const engSelectedAfterDrop = engStillSelected !== null;
          const hebSelectedAfterDrop = hebStillSelected !== null;
+         const currentCanConfirm = engSelectedAfterDrop && hebSelectedAfterDrop;
+         const currentCanUnlink = false; // Keep unlink disabled
 
-         const currentManualAlignments = updatedManualAlignments; // Use the just-updated alignments
-
-         const engAlreadyLinked = engSelectedAfterDrop && currentManualAlignments.some(link => link.englishIndex === engStillSelected && link.hebrewIndex !== hebStillSelected);
-         const hebAlreadyLinked = hebSelectedAfterDrop && currentManualAlignments.some(link => link.hebrewIndex === hebStillSelected && link.englishIndex !== engStillSelected);
-         const isCurrentlyLinkedPair = engSelectedAfterDrop && hebSelectedAfterDrop && currentManualAlignments.some(link => link.englishIndex === engStillSelected && link.hebrewIndex === hebStillSelected);
-
-         const currentCanLink = engSelectedAfterDrop && hebSelectedAfterDrop && !engAlreadyLinked && !hebAlreadyLinked && !isCurrentlyLinkedPair;
-         const currentCanUnlink = (engSelectedAfterDrop && currentManualAlignments.some(link => link.englishIndex === engStillSelected)) ||
-                             (hebSelectedAfterDrop && currentManualAlignments.some(link => link.hebrewIndex === hebStillSelected));
-
-          console.log(`Resetting controls after drop: engSel=${engSelectedAfterDrop}, hebSel=${hebSelectedAfterDrop}, currentCanLink=${currentCanLink}, currentCanUnlink=${currentCanUnlink}`);
-         setCanLink(currentCanLink);
+          console.log(`Resetting controls after drop: engSel=${engSelectedAfterDrop}, hebSel=${hebSelectedAfterDrop}, currentCanConfirm=${currentCanConfirm}, currentCanUnlink=${currentCanUnlink}`);
+         setCanConfirmPair(currentCanConfirm);
          setCanUnlink(currentCanUnlink);
-         setControlsDisabled(!(currentCanLink || currentCanUnlink));
+         setControlsDisabled(!currentCanConfirm);
 
      };
 
@@ -701,39 +666,28 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
              if (displayedIndex >= displayedHebrew.length) return prev; // Index out of bounds check
 
-            const targetParagraph = displayedHebrew[displayedIndex - 1];
-            const sourceParagraph = displayedHebrew[displayedIndex];
+            const targetParagraphData = displayedHebrew[displayedIndex - 1];
+            const sourceParagraphData = displayedHebrew[displayedIndex];
 
-            // Create the merged paragraph text (using original, non-normalized text for merging if needed, or just concatenate normalized)
-            // Concatenate the already normalized paragraphs
-            const mergedText = `${targetParagraph.paragraph}\n\n${sourceParagraph.paragraph}`; // Add double newline between merged paragraphs
+            // Create the merged paragraph text using normalized text
+            const mergedText = `${targetParagraphData.paragraph}\n\n${sourceParagraphData.paragraph}`; // Add double newline between merged paragraphs
 
-            // Create the new paragraph object, keeping the originalIndex of the *target* (upper) paragraph
-            const mergedParagraph = { ...targetParagraph, paragraph: mergedText };
-
-             // Update the original paragraph list (find by originalIndex and update)
-             const originalIndexToUpdate = targetParagraph.originalIndex;
+             // Update the original paragraph list (find by originalIndex and update text)
+             const targetOriginalIndex = targetParagraphData.originalIndex;
+             const sourceOriginalIndex = sourceParagraphData.originalIndex;
              const newOriginalHebrew = prev.hebrew.original.map(p =>
-                 p.originalIndex === originalIndexToUpdate ? { ...p, paragraph: mergedText } : p
-             );
+                 p.originalIndex === targetOriginalIndex ? { ...p, paragraph: mergedText } : p
+             ).filter(p => p.originalIndex !== sourceOriginalIndex); // Remove the original source paragraph
 
-            // Remove the source paragraph from the displayed list
-            const newDisplayedHebrew = [
-                ...displayedHebrew.slice(0, displayedIndex - 1), // Elements before target
-                mergedParagraph,                             // The merged paragraph
-                ...displayedHebrew.slice(displayedIndex + 1)   // Elements after source
-            ];
+            // Remove the source paragraph from the displayed list and update the target
+             const newDisplayedHebrew = displayedHebrew
+                .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText } : p) // Update target in displayed list
+                .filter((_, idx) => idx !== displayedIndex); // Remove source from displayed list
+
 
             // --- Update Alignments ---
-            // Remove any alignments involving the *source* paragraph's original index
-            const sourceOriginalIndex = sourceParagraph.originalIndex;
-            const newManualAlignments = manualAlignments.filter(a => a.hebrewIndex !== sourceOriginalIndex);
+            // Remove any suggested alignments involving the *source* paragraph's original index
             const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== sourceOriginalIndex) ?? null;
-
-            // Update alignments pointing to paragraphs *after* the merged source
-            // Note: We don't need to shift indices because we are removing an element,
-            // the indices of subsequent elements in the *original* array remain the same.
-            // The AI prompt uses original indices, so they should remain stable.
 
             // --- Update Hidden Indices ---
             // Remove the source paragraph's original index from hidden set if present
@@ -742,23 +696,22 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
 
             // --- Update State ---
-            setManualAlignments(newManualAlignments); // Persist alignment changes
             setSuggestedAlignments(newSuggestedAlignments);
             setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden })); // Persist hidden index change
             setSelectedHebrewIndex(null); // Deselect Hebrew after merge
             setSelectedEnglishIndex(null); // Deselect English too for consistency
-            setCanLink(false);
+            setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
 
             toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex}.` });
-            console.log(`Merged up: Target originalIdx=${originalIndexToUpdate}, Source originalIdx=${sourceOriginalIndex}`);
+            console.log(`Merged up: Target originalIdx=${targetOriginalIndex}, Source originalIdx=${sourceOriginalIndex}`);
 
             return {
                  ...prev,
                  hebrew: {
-                    original: newOriginalHebrew, // Update original text as well
-                    displayed: newDisplayedHebrew,
+                    original: newOriginalHebrew, // Use updated original list
+                    displayed: newDisplayedHebrew, // Use updated displayed list
                  },
             };
         });
@@ -773,31 +726,25 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                   return prev; // Cannot merge down the last paragraph
              }
 
-            const sourceParagraph = displayedHebrew[displayedIndex];
-            const targetParagraph = displayedHebrew[displayedIndex + 1];
+            const sourceParagraphData = displayedHebrew[displayedIndex];
+            const targetParagraphData = displayedHebrew[displayedIndex + 1];
 
             // Concatenate the already normalized paragraphs
-            const mergedText = `${sourceParagraph.paragraph}\n\n${targetParagraph.paragraph}`; // Add double newline
+            const mergedText = `${sourceParagraphData.paragraph}\n\n${targetParagraphData.paragraph}`; // Add double newline
 
-            // Create the new paragraph object, keeping the originalIndex of the *source* (upper) paragraph
-            const mergedParagraph = { ...sourceParagraph, paragraph: mergedText };
-
-            // Update the original paragraph list (find by originalIndex and update)
-            const originalIndexToUpdate = sourceParagraph.originalIndex;
+            // Update the original paragraph list (find source by originalIndex, update text, remove target)
+            const sourceOriginalIndex = sourceParagraphData.originalIndex;
+            const targetOriginalIndex = targetParagraphData.originalIndex;
              const newOriginalHebrew = prev.hebrew.original.map(p =>
-                 p.originalIndex === originalIndexToUpdate ? { ...p, paragraph: mergedText } : p
-             );
+                 p.originalIndex === sourceOriginalIndex ? { ...p, paragraph: mergedText } : p
+             ).filter(p => p.originalIndex !== targetOriginalIndex); // Remove the original target paragraph
 
-            // Remove the target paragraph from the displayed list
-            const newDisplayedHebrew = [
-                ...displayedHebrew.slice(0, displayedIndex), // Elements before source
-                mergedParagraph,                          // The merged paragraph
-                ...displayedHebrew.slice(displayedIndex + 2) // Elements after target
-            ];
+            // Remove the target paragraph from the displayed list and update the source
+             const newDisplayedHebrew = displayedHebrew
+                .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText } : p) // Update source in displayed list
+                .filter((_, idx) => idx !== displayedIndex + 1); // Remove target from displayed list
 
             // --- Update Alignments ---
-            const targetOriginalIndex = targetParagraph.originalIndex;
-            const newManualAlignments = manualAlignments.filter(a => a.hebrewIndex !== targetOriginalIndex);
             const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== targetOriginalIndex) ?? null;
 
              // --- Update Hidden Indices ---
@@ -805,30 +752,54 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              newHebrewHidden.delete(targetOriginalIndex);
 
             // --- Update State ---
-            setManualAlignments(newManualAlignments);
             setSuggestedAlignments(newSuggestedAlignments);
              setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
             setSelectedHebrewIndex(null);
             setSelectedEnglishIndex(null);
-            setCanLink(false);
+            setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
 
              toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex + 2}.` });
-             console.log(`Merged down: Source originalIdx=${originalIndexToUpdate}, Target originalIdx=${targetOriginalIndex}`);
+             console.log(`Merged down: Source originalIdx=${sourceOriginalIndex}, Target originalIdx=${targetOriginalIndex}`);
 
 
             return {
                  ...prev,
                  hebrew: {
-                    original: newOriginalHebrew, // Update original text as well
-                    displayed: newDisplayedHebrew,
+                    original: newOriginalHebrew, // Use updated original list
+                    displayed: newDisplayedHebrew, // Use updated displayed list
                  },
              };
         });
      };
 
      // --- END MERGE FUNCTIONALITY ---
+
+     // --- DOWNLOAD JSONL FUNCTIONALITY ---
+      const handleDownloadJsonl = () => {
+         if (jsonlRecords.length === 0) {
+             toast({ title: "Download Error", description: "No confirmed pairs to download.", variant: "destructive" });
+             return;
+         }
+
+         setIsDownloading(true);
+         try {
+             // Join the stored JSONL strings with newlines
+             const jsonlContent = jsonlRecords.join('\n') + '\n'; // Ensure trailing newline
+
+             const blob = new Blob([jsonlContent], { type: "application/jsonl;charset=utf-8" });
+             saveAs(blob, "fine_tune.jsonl"); // Use the filename from the example
+             toast({ title: "Download Started", description: "Downloading fine_tune.jsonl file." });
+
+         } catch (error: any) {
+             console.error("Failed to generate JSONL download:", error);
+             toast({ title: "Download Failed", description: error.message || "An error occurred while generating the download file.", variant: "destructive" });
+         } finally {
+             setIsDownloading(false);
+         }
+     };
+     // --- END DOWNLOAD JSONL FUNCTIONALITY ---
 
 
      // New useEffect for scroll synchronization
@@ -858,7 +829,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                 const pElement = paragraphElements[i];
                 const pRect = pElement.getBoundingClientRect();
                 // Find the first paragraph whose top is AT OR JUST ABOVE the viewport top
-                // Removed tolerance: if (pRect.top >= viewportRect.top - 5) {
                  if (pRect.top >= viewportRect.top) {
                     // console.log(`Top visible element found at index ${i}:`, pElement);
                     return i;
@@ -955,7 +925,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  <CardHeader className="py-2 px-3 border-b"> {/* Optional: Add header for visual separation */}
                      {/* Optionally add a title like <CardTitle className="text-sm">Load Texts</CardTitle> */}
                  </CardHeader>
-                 <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 items-end">
+                 <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-2 p-3 items-end"> {/* Changed to 4 cols */}
                      <div className="space-y-1">
                          <Label htmlFor="english-url" className="text-xs">English URL</Label>
                          <Input
@@ -964,7 +934,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="English URL"
                              value={englishUrl}
                              onChange={handleEnglishUrlChange}
-                             disabled={isFetching || isSuggesting}
+                             disabled={isFetching || isSuggesting || isDownloading}
                              className="h-8 text-sm"
                          />
                      </div>
@@ -976,14 +946,14 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="Hebrew URL"
                              value={hebrewUrl}
                              onChange={handleHebrewUrlChange}
-                             disabled={isFetching || isSuggesting}
+                             disabled={isFetching || isSuggesting || isDownloading}
                              dir="rtl"
                              className="h-8 text-sm"
                          />
                      </div>
                      <Button
                          onClick={handleFetchTexts}
-                         disabled={isFetching || isSuggesting || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Handle null/undefined case for trim
+                         disabled={isFetching || isSuggesting || isDownloading || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Handle null/undefined case for trim
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
                      >
@@ -993,6 +963,21 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              <DownloadCloud className="mr-1 h-3 w-3" />
                          )}
                          {isFetching ? 'Fetching...' : 'Fetch'}
+                     </Button>
+                      {/* Download JSONL Button */}
+                      <Button
+                         onClick={handleDownloadJsonl}
+                         disabled={isDownloading || jsonlRecords.length === 0 || isFetching || isSuggesting}
+                         className="w-full sm:w-auto h-8 text-xs"
+                         size="sm"
+                         variant="outline" // Use outline variant for download
+                     >
+                         {isDownloading ? (
+                             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                         ) : (
+                             <DownloadCloud className="mr-1 h-3 w-3" />
+                         )}
+                         {isDownloading ? 'Preparing...' : `Download Pairs (${jsonlRecords.length})`}
                      </Button>
                  </CardContent>
              </Card>
@@ -1007,7 +992,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          isLoading={isFetching && englishText === null}
                          selectedOriginalIndex={selectedEnglishIndex}
                          onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         manualAlignments={manualAlignments}
+                         manualAlignments={manualAlignments} // Still passing, might be removed later
                          alignmentKey="englishIndex"
                          suggestedAlignments={suggestedAlignments}
                          suggestionKey="englishParagraphIndex"
@@ -1032,17 +1017,17 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          isLoading={isFetching && hebrewText === null}
                          selectedOriginalIndex={selectedHebrewIndex}
                          onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         manualAlignments={manualAlignments}
+                         manualAlignments={manualAlignments} // Still passing, might be removed later
                          alignmentKey="hebrewIndex"
                          suggestedAlignments={suggestedAlignments}
                          suggestionKey="hebrewParagraphIndex"
                          highlightedSuggestionIndex={highlightedSuggestionTargetIndex} // Highlight based on target
                          linkedHighlightIndex={highlightedSuggestionIndex} // Link based on source
                          showControls={true}
-                         onLink={handleLink}
-                         onUnlink={handleUnlink}
+                         onConfirmPair={handleConfirmPair} // Pass confirm handler instead of link
+                         onUnlink={handleUnlink} // Still passing, might be removed later
                          onSuggest={handleSuggest}
-                         canLink={canLink}
+                         canConfirmPair={canConfirmPair} // Use confirm state
                          canUnlink={canUnlink}
                          isSuggesting={isSuggesting}
                          hasSuggestions={suggestedAlignments !== null}

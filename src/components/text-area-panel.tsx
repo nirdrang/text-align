@@ -28,7 +28,7 @@ interface TextAreaPanelProps {
   selectedOriginalIndex: number | null;
   // Callback receives the DISPLAYED index and the language
   onParagraphSelect: (displayedIndex: number, language: 'english' | 'hebrew') => void;
-  manualAlignments: ManualAlignment[];
+  manualAlignments: ManualAlignment[]; // Still passing, might be removed
   alignmentKey: 'englishIndex' | 'hebrewIndex';
   suggestedAlignments: SuggestedAlignment[] | null;
   suggestionKey: 'englishParagraphIndex' | 'hebrewParagraphIndex';
@@ -47,10 +47,10 @@ interface TextAreaPanelProps {
 
   // Optional props for controls (passed to Hebrew panel)
   showControls?: boolean;
-  onLink?: () => void;
+  onConfirmPair?: () => void; // Renamed from onLink
   onUnlink?: () => void;
   onSuggest?: () => void;
-  canLink?: boolean;
+  canConfirmPair?: boolean; // Renamed from canLink
   canUnlink?: boolean;
   isSuggesting?: boolean;
   hasSuggestions?: boolean;
@@ -67,7 +67,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   isLoading = false,
   selectedOriginalIndex, // Use this prop for selection check
   onParagraphSelect,
-  manualAlignments,
+  manualAlignments, // Still passing, might be removed
   alignmentKey,
   suggestedAlignments,
   suggestionKey,
@@ -82,10 +82,10 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   isScrollSyncEnabled, // Use scroll sync state
   onToggleScrollSync, // Use scroll sync handler
   showControls = false,
-  onLink,
+  onConfirmPair, // Renamed prop
   onUnlink,
   onSuggest,
-  canLink = false,
+  canConfirmPair = false, // Renamed prop
   canUnlink = false,
   isSuggesting = false,
   hasSuggestions = false,
@@ -99,12 +99,12 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
     const hasContent = hasAttemptedLoad && displayedParagraphs.length > 0;
     const isEmptyAfterLoad = hasAttemptedLoad && displayedParagraphs.length === 0 && !isLoading;
 
-    // Check manual alignment using ORIGINAL indices
+    // Check manual alignment using ORIGINAL indices (might be removed)
     const isManuallyAligned = (originalIndex: number): boolean => {
         return manualAlignments.some((link) => link[alignmentKey] === originalIndex);
     };
 
-    // Get linked partner's ORIGINAL index
+    // Get linked partner's ORIGINAL index (might be removed)
     const getLinkedPartnerIndex = (originalIndex: number): number | null => {
         const partnerKey = alignmentKey === 'englishIndex' ? 'hebrewIndex' : 'englishIndex';
         const alignment = manualAlignments.find(link => link[alignmentKey] === originalIndex);
@@ -167,12 +167,12 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                         </TooltipContent>
                      </Tooltip>
                  </div>
-                {showControls && onLink && onUnlink && onSuggest && (
+                {showControls && onConfirmPair && onUnlink && onSuggest && ( // Check for onConfirmPair
                 <InlineAlignmentControls
-                    onLink={onLink}
+                    onConfirmPair={onConfirmPair} // Pass renamed prop
                     onUnlink={onUnlink}
                     onSuggest={onSuggest}
-                    canLink={canLink}
+                    canConfirmPair={canConfirmPair} // Pass renamed prop
                     canUnlink={canUnlink}
                     isSuggesting={isSuggesting}
                     hasSuggestions={hasSuggestions}
@@ -206,8 +206,8 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 
                         // Checks use ORIGINAL indices
                         const isSelected = selectedOriginalIndex === originalIndex;
-                        const manuallyAligned = isManuallyAligned(originalIndex);
-                        const linkedPartnerOriginalIndex = getLinkedPartnerIndex(originalIndex);
+                        const manuallyAligned = false; // Link status is not tracked this way anymore
+                        const linkedPartnerOriginalIndex = null; // Link status is not tracked this way anymore
                         const suggestionConfidence = getSuggestionConfidence(originalIndex);
                         const isSuggested = suggestionConfidence !== null;
                         const suggestionPartnerOriginalIndex = getSuggestionPartnerIndex(originalIndex);
@@ -232,7 +232,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                         }
 
                         // Get displayed indices for tooltips
-                        const linkedPartnerDisplayedIndex = linkedPartnerOriginalIndex !== null ? getDisplayedIndex(linkedPartnerOriginalIndex) : null;
+                        const linkedPartnerDisplayedIndex = null; // Link status not tracked
                         const suggestionPartnerDisplayedIndex = suggestionPartnerOriginalIndex !== null ? getDisplayedIndex(suggestionPartnerOriginalIndex) : null;
 
                         return (
@@ -242,7 +242,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                                 originalIndex={originalIndex} // Pass original index for data attributes and drop callback
                                 paragraph={paragraph}
                                 isSelected={isSelected}
-                                isManuallyAligned={manuallyAligned}
+                                isManuallyAligned={manuallyAligned} // Always false now
                                 isSuggested={isSuggested}
                                 isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight}
                                 highlightStyle={highlightStyle}

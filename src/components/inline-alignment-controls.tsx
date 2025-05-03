@@ -1,16 +1,17 @@
+
 "use client";
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Link2, Link2Off, BrainCircuit, Loader2 } from 'lucide-react';
+import { Check, Link2Off, BrainCircuit, Loader2 } from 'lucide-react'; // Changed Link2 to Check
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface InlineAlignmentControlsProps {
-  onLink: () => void;
+  onConfirmPair: () => void; // Renamed from onLink
   onUnlink: () => void;
   onSuggest: () => void;
-  canLink: boolean;
+  canConfirmPair: boolean; // Renamed from canLink
   canUnlink: boolean;
   isSuggesting: boolean;
   hasSuggestions: boolean;
@@ -18,10 +19,10 @@ interface InlineAlignmentControlsProps {
 }
 
 const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
-  onLink,
+  onConfirmPair, // Renamed prop
   onUnlink,
   onSuggest,
-  canLink,
+  canConfirmPair, // Renamed prop
   canUnlink,
   isSuggesting,
   hasSuggestions,
@@ -33,18 +34,18 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
-                        onClick={onLink}
-                        disabled={!canLink || disabled}
+                        onClick={onConfirmPair} // Use renamed handler
+                        disabled={!canConfirmPair || disabled} // Use renamed state variable
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-accent-foreground hover:bg-accent"
-                        aria-label="Link selected paragraphs"
+                        className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10" // Changed hover color to primary
+                        aria-label="Confirm selected pair" // Updated label
                     >
-                        <Link2 className="h-4 w-4" />
+                        <Check className="h-4 w-4" /> {/* Changed icon */}
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                    <p>Link Selected Paragraphs</p>
+                    <p>Confirm Selected Pair</p> {/* Updated tooltip */}
                 </TooltipContent>
             </Tooltip>
 
@@ -52,17 +53,18 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
                 <TooltipTrigger asChild>
                     <Button
                         onClick={onUnlink}
-                        disabled={!canUnlink || disabled}
+                        disabled={!canUnlink || disabled} // Keep unlink logic for now, might be removed
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        aria-label="Unlink selected paragraphs"
+                        aria-label="Unlink selected paragraphs (Disabled)" // Indicate it might be disabled/removed
                     >
                         <Link2Off className="h-4 w-4" />
                     </Button>
                  </TooltipTrigger>
                 <TooltipContent>
-                    <p>Unlink Selected Paragraph</p>
+                    {/* Updated tooltip to reflect potential disabling */}
+                    <p>Unlink Selected Paragraph (May be disabled)</p>
                 </TooltipContent>
              </Tooltip>
 
