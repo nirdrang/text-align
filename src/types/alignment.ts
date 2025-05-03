@@ -1,7 +1,10 @@
 
 
-export interface SuggestedAlignment {
-  englishParagraphIndex: number; // This refers to the ORIGINAL index
-  hebrewParagraphIndex: number; // This refers to the ORIGINAL index
-  confidence: number;
+// Interface representing the structure of a JSONL record for fine-tuning
+export interface JsonlRecord {
+  messages: [
+    { role: 'system'; content: string },
+    { role: 'user'; content: string },
+    { role: 'assistant'; content: string }
+  ];
 }

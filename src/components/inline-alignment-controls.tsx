@@ -3,29 +3,26 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Check, Link2Off, BrainCircuit, Loader2 } from 'lucide-react'; // Changed Link2 to Check
+import { Check, Link2Off } from 'lucide-react'; // Removed BrainCircuit, Loader2
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface InlineAlignmentControlsProps {
-  onConfirmPair: () => void; // Renamed from onLink
+  onConfirmPair: () => void;
   onUnlink: () => void;
-  onSuggest: () => void;
-  canConfirmPair: boolean; // Renamed from canLink
+  // Removed onSuggest prop
+  canConfirmPair: boolean;
   canUnlink: boolean;
-  isSuggesting: boolean;
-  hasSuggestions: boolean;
+  // Removed isSuggesting and hasSuggestions props
   disabled?: boolean;
 }
 
 const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
-  onConfirmPair, // Renamed prop
+  onConfirmPair,
   onUnlink,
-  onSuggest,
-  canConfirmPair, // Renamed prop
+  canConfirmPair,
   canUnlink,
-  isSuggesting,
-  hasSuggestions,
+  // Removed isSuggesting, hasSuggestions
   disabled = false,
 }) => {
   return (
@@ -34,18 +31,18 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
-                        onClick={onConfirmPair} // Use renamed handler
-                        disabled={!canConfirmPair || disabled} // Use renamed state variable
+                        onClick={onConfirmPair}
+                        disabled={!canConfirmPair || disabled}
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10" // Changed hover color to primary
-                        aria-label="Confirm selected pair" // Updated label
+                        className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                        aria-label="Confirm selected pair"
                     >
-                        <Check className="h-4 w-4" /> {/* Changed icon */}
+                        <Check className="h-4 w-4" />
                     </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                    <p>Confirm Selected Pair</p> {/* Updated tooltip */}
+                    <p>Confirm Selected Pair</p>
                 </TooltipContent>
             </Tooltip>
 
@@ -53,42 +50,21 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
                 <TooltipTrigger asChild>
                     <Button
                         onClick={onUnlink}
-                        disabled={!canUnlink || disabled} // Keep unlink logic for now, might be removed
+                        disabled={!canUnlink || disabled}
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        aria-label="Unlink selected paragraphs (Disabled)" // Indicate it might be disabled/removed
+                        aria-label="Unlink selected paragraphs (Disabled)"
                     >
                         <Link2Off className="h-4 w-4" />
                     </Button>
                  </TooltipTrigger>
                 <TooltipContent>
-                    {/* Updated tooltip to reflect potential disabling */}
                     <p>Unlink Selected Paragraph (May be disabled)</p>
                 </TooltipContent>
              </Tooltip>
 
-             <Tooltip>
-                <TooltipTrigger asChild>
-                    <Button
-                        onClick={onSuggest}
-                        disabled={isSuggesting || disabled}
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
-                        aria-label={hasSuggestions ? "Suggest Alignments Again" : "Suggest Alignments"}
-                    >
-                        {isSuggesting ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                        <BrainCircuit className="h-4 w-4" />
-                        )}
-                    </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                    <p>{isSuggesting ? 'Suggesting...' : (hasSuggestions ? 'Re-Suggest Alignments' : 'Suggest Alignments with AI')}</p>
-                </TooltipContent>
-             </Tooltip>
+             {/* Removed Suggest Button */}
         </div>
     </TooltipProvider>
   );

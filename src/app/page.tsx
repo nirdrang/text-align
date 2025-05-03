@@ -5,15 +5,14 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Label } from '@/components/ui/label';
  import { Input } from '@/components/ui/input';
- import { Button } from '@/components/ui/button'; // Import Button
- import { Loader2, DownloadCloud, Check, Eraser, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react'; // Added Check, Eraser, Link Icons
- import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path
+ import { Button } from '@/components/ui/button';
+ import { Loader2, DownloadCloud, Check, Eraser, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react';
+ import { useDebounce } from '@/hooks/use-debounce';
  import { fetchTexts } from '@/lib/api';
- import { SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
  import { useLocalStorage } from '@/hooks/use-local-storage';
-import { useToast } from '@/hooks/use-toast'; // Import useToast
-import { saveAs } from 'file-saver'; // Import file-saver
+import { useToast } from '@/hooks/use-toast';
+import { saveAs } from 'file-saver';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +23,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"; // Import AlertDialog components
+} from "@/components/ui/alert-dialog";
+// Removed scoreAlignment import
 
 
 // Throttling function
@@ -110,34 +110,31 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 }
 
 
+ // Interface for displayed paragraphs
+ interface DisplayedParagraphData {
+    paragraph: string;
+    originalIndex: number;
+ }
+
  function parseParagraphs(text: string | null, language: 'english' | 'hebrew'): string[] {
      if (!text) return [];
-     // Split by double newline to separate paragraphs. Corrected regex: Use double backslashes for \n and \s
-     // Updated regex to split by two or more newline characters, optionally surrounded by whitespace.
      return text.split(/(?:\s*\n\s*){2,}/)
-         .map(paragraph => paragraph.trim()) // Trim whitespace first
-         .filter(paragraph => paragraph !== '') // Filter empty paragraphs
-         .map((paragraph, index) => { // Apply normalization based on language
-              const originalParagraph = paragraph; // Keep original for comparison
+         .map(paragraph => paragraph.trim())
+         .filter(paragraph => paragraph !== '')
+         .map((paragraph, index) => {
+              const originalParagraph = paragraph;
               let normalizedParagraph: string;
 
               if (language === 'hebrew') {
-                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true); // Keep Nikud by default
-                 // Log if normalization changed the text
+                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true);
                  if (originalParagraph !== normalizedParagraph) {
                     console.log(`[Normalization] Hebrew Paragraph ${index + 1} Normalized:`);
-                    console.log("  Before:", originalParagraph.substring(0, 100) + (originalParagraph.length > 100 ? "..." : "")); // Log first 100 chars
-                    console.log("  After: ", normalizedParagraph.substring(0, 100) + (normalizedParagraph.length > 100 ? "..." : "")); // Log first 100 chars
+                    console.log("  Before:", originalParagraph.substring(0, 100) + (originalParagraph.length > 100 ? "..." : ""));
+                    console.log("  After: ", normalizedParagraph.substring(0, 100) + (normalizedParagraph.length > 100 ? "..." : ""));
                  }
               } else {
-                 // English text is treated as ground truth, no normalization applied
+                 // English text is not normalized
                  normalizedParagraph = originalParagraph;
-                  // Log if normalization changed the text (shouldn't happen now)
-                 if (originalParagraph !== normalizedParagraph) {
-                    console.log(`[Normalization] English Paragraph ${index + 1} WAS Normalized (This should not happen):`);
-                    console.log("  Before:", originalParagraph);
-                    console.log("  After: ", normalizedParagraph);
-                 }
               }
               return normalizedParagraph;
          });
@@ -165,11 +162,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      const [processedParagraphs, setProcessedParagraphs] = useState<{
         english: {
             original: { paragraph: string; originalIndex: number }[];
-            displayed: { paragraph: string; originalIndex: number }[];
+            displayed: DisplayedParagraphData[];
         };
         hebrew: {
             original: { paragraph: string; originalIndex: number }[];
-            displayed: { paragraph: string; originalIndex: number }[];
+            displayed: DisplayedParagraphData[];
         };
     }>({
          english: { original: [], displayed: [] },
@@ -177,34 +174,26 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      });
      const [selectedEnglishIndex, setSelectedEnglishIndex] = useState<number | null>(null);
      const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
-     // State for storing confirmed JSONL records
      const [jsonlRecords, setJsonlRecords] = useLocalStorage<string[]>('jsonlRecords', []);
-     const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
-     const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
-     const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
-     const [isSuggesting, setIsSuggesting] = useState(false);
-     const [canConfirmPair, setCanConfirmPair] = useState(false); // Renamed from canLink
-     const [canUnlink, setCanUnlink] = useState(false); // Unlinking might be removed or repurposed
+     const [canConfirmPair, setCanConfirmPair] = useState(false);
+     const [canUnlink, setCanUnlink] = useState(false);
      const [controlsDisabled, setControlsDisabled] = useState(true);
-     const [hiddenIndices, setHiddenIndices] = useLocalStorage<{ // Persist hidden indices
+     const [hiddenIndices, setHiddenIndices] = useLocalStorage<{
          english: Set<number>;
          hebrew: Set<number>;
      }>('hiddenIndices', {
          english: new Set<number>(),
          hebrew: new Set<number>(),
      });
-     // Add state for scroll sync preference, persisted in localStorage
      const [isScrollSyncEnabled, setIsScrollSyncEnabled] = useLocalStorage('isScrollSyncEnabled', true);
-     const [isDownloading, setIsDownloading] = useState(false); // State for download button
-
+     const [isDownloading, setIsDownloading] = useState(false);
+     // Removed isScoring state
 
      const englishPanelRef = useRef<HTMLDivElement>(null);
      const hebrewPanelRef = useRef<HTMLDivElement>(null);
+     const lastScrollTimeRef = useRef(0);
 
-    const [isUserScrolling, setIsUserScrolling] = useState(true); // Initialize to true
-    const lastScrollTimeRef = useRef(0); // Ref to store the last scroll event time
-
-    const { toast } = useToast(); // Initialize toast
+    const { toast } = useToast();
 
      const textsAreLoaded = englishText !== null && hebrewText !== null;
 
@@ -216,9 +205,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setHebrewUrl(e.target.value);
      };
 
-     // Effect to rehydrate persisted state on client mount
      useEffect(() => {
-         // Rehydrate JSONL records
          const storedJsonlRecords = localStorage.getItem('jsonlRecords');
          if (storedJsonlRecords) {
              try {
@@ -227,8 +214,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  console.error("Failed to parse stored JSONL records:", e);
              }
          }
-
-         // Rehydrate hidden indices (Set needs special handling)
          const storedHiddenIndices = localStorage.getItem('hiddenIndices');
          if (storedHiddenIndices) {
              try {
@@ -239,114 +224,101 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  });
              } catch (e) {
                  console.error("Failed to parse stored hidden indices:", e);
-                 setHiddenIndices({ english: new Set(), hebrew: new Set() }); // Reset on error
+                 setHiddenIndices({ english: new Set(), hebrew: new Set() });
              }
          }
-
-          // Rehydrate scroll sync preference
           const storedScrollSync = localStorage.getItem('isScrollSyncEnabled');
-           if (storedScrollSync !== null) { // Check if item exists
+           if (storedScrollSync !== null) {
                try {
                    setIsScrollSyncEnabled(JSON.parse(storedScrollSync));
                } catch (e) {
                   console.error("Failed to parse stored scroll sync preference:", e);
                }
            }
-
-         // Initial check for fetch based on persisted URLs
          if (englishUrl && hebrewUrl && !textsAreLoaded) {
              handleFetchTexts();
          }
-        // Only run once on mount to rehydrate
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+     // eslint-disable-next-line react-hooks/exhaustive-deps
      }, []);
 
 
      const handleFetchTexts = useCallback(async () => {
-        const urlToFetchEng = debouncedEnglishUrl || englishUrl; // Use debounced first, fallback to current state
+        const urlToFetchEng = debouncedEnglishUrl || englishUrl;
         const urlToFetchHeb = debouncedHebrewUrl || hebrewUrl;
 
         if (!urlToFetchEng.trim() || !urlToFetchHeb.trim()) {
-            console.log("URLs not ready for fetching.");
              toast({
                  title: "Missing URLs",
                  description: "Please enter both English and Hebrew URLs.",
                  variant: "destructive",
+                 duration: 2000, // Consistent duration
              });
             return;
         }
          setIsFetching(true);
-         setEnglishText(null); // Reset text state
-         setHebrewText(null); // Reset text state
-         setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } }); // Reset paragraphs
-         // Clear JSONL records when fetching new text
-         // We intentionally DO NOT clear jsonlRecords here. User can use "Start Fresh"
-         // setJsonlRecords([]);
-         setSuggestedAlignments(null);
+         setEnglishText(null);
+         setHebrewText(null);
+         setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } });
+         // Reset hidden indices for new text (unless "Start Fresh" is clicked, which handles JSONL separately)
+         setHiddenIndices({ english: new Set(), hebrew: new Set() });
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
-         // Reset hidden indices for new text fetch
-         setHiddenIndices({ english: new Set(), hebrew: new Set() });
+         setCanConfirmPair(false);
+         setCanUnlink(false);
+         setControlsDisabled(true);
 
 
          try {
              const [fetchedEnglish, fetchedHebrew] = await fetchTexts(urlToFetchEng, urlToFetchHeb);
-             setEnglishText(fetchedEnglish); // Store raw fetched text
-             setHebrewText(fetchedHebrew);   // Store raw fetched text
+             setEnglishText(fetchedEnglish);
+             setHebrewText(fetchedHebrew);
 
-             // Parse paragraphs and assign original indices - applying language-specific normalization
              const englishParagraphs = parseParagraphs(fetchedEnglish, 'english');
              const hebrewParagraphs = parseParagraphs(fetchedHebrew, 'hebrew');
              const englishParagraphsWithIndices = assignOriginalIndices(englishParagraphs);
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
-             console.log(`[Post-Normalization] Parsed English Paragraphs Count: ${englishParagraphsWithIndices.length}`);
-             console.log(`[Post-Normalization] Parsed Hebrew Paragraphs Count: ${hebrewParagraphsWithIndices.length}`);
 
-              // Automatically identify and hide metadata paragraphs
-             const newHiddenIndices = {
+              const newHiddenIndices = {
                  english: new Set<number>(),
                  hebrew: new Set<number>(),
              };
 
              englishParagraphsWithIndices.forEach(item => {
-                 // Use the *original* (non-normalized) paragraph for word count on English side
                  const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                 if (wordCount <= 20) {
                      newHiddenIndices.english.add(item.originalIndex);
-                     console.log(`Auto-hiding English paragraph ${item.originalIndex} (short: ${wordCount} words)`);
                  }
              });
              hebrewParagraphsWithIndices.forEach(item => {
-                  // Use the normalized paragraph for word count on Hebrew side
                  const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                 if (wordCount <= 20) {
                       newHiddenIndices.hebrew.add(item.originalIndex);
-                      console.log(`Auto-hiding Hebrew paragraph ${item.originalIndex} (short: ${wordCount} words)`);
                  }
              });
-             setHiddenIndices(newHiddenIndices); // Update state and persist the auto-detected ones
+             setHiddenIndices(newHiddenIndices);
 
+             // Convert to DisplayedParagraphData structure
+             const mapToDisplayedData = (item: { paragraph: string; originalIndex: number }): DisplayedParagraphData => ({
+                 paragraph: item.paragraph,
+                 originalIndex: item.originalIndex,
+             });
 
-             // Initialize with filtered paragraphs using the potentially updated hiddenIndices
              setProcessedParagraphs({
                  english: {
                      original: englishParagraphsWithIndices,
-                     displayed: filterMetadata(englishParagraphsWithIndices, newHiddenIndices.english),
+                     displayed: filterMetadata(englishParagraphsWithIndices, newHiddenIndices.english).map(mapToDisplayedData),
                  },
                  hebrew: {
                      original: hebrewParagraphsWithIndices,
-                     displayed: filterMetadata(hebrewParagraphsWithIndices, newHiddenIndices.hebrew),
+                     displayed: filterMetadata(hebrewParagraphsWithIndices, newHiddenIndices.hebrew).map(mapToDisplayedData),
                  },
              });
 
-             // Clear selections and button states
              setSelectedEnglishIndex(null);
              setSelectedHebrewIndex(null);
-             setHighlightedSuggestionIndex(null);
-             setHighlightedSuggestionTargetIndex(null);
-             setCanConfirmPair(false); // Renamed from canLink
-             setCanUnlink(false); // Unlink might be repurposed or removed
-             setControlsDisabled(true); // Start with controls disabled
+             setCanConfirmPair(false);
+             setCanUnlink(false);
+             setControlsDisabled(true);
          } catch (error: any) {
              console.error("Failed to fetch texts:", error);
              toast({
@@ -359,11 +331,9 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              setIsFetching(false);
          }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setHiddenIndices, setJsonlRecords, toast]); // Add setJsonlRecords
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setHiddenIndices, toast]);
 
-     // This useEffect runs when the debounced URLs change
      useEffect(() => {
-         // Fetch only if URLs have changed and are valid
          if (debouncedEnglishUrl && debouncedHebrewUrl && (debouncedEnglishUrl !== englishUrl || debouncedHebrewUrl !== hebrewUrl)) {
              handleFetchTexts();
          }
@@ -372,115 +342,84 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
       const handleParagraphSelect = (displayedIndex: number, language: 'english' | 'hebrew') => {
         if (!processedParagraphs[language].displayed[displayedIndex]) {
             console.warn(`Selected invalid displayed index ${displayedIndex} for ${language}`);
-            return; // Avoid error if index is out of bounds
+            return;
         }
          const originalIndex = processedParagraphs[language].displayed[displayedIndex].originalIndex;
-         console.log(`Paragraph selected: Lang=${language}, DisplayedIdx=${displayedIndex}, OriginalIdx=${originalIndex}`);
 
-        // Check if the clicked paragraph is already selected
         if (language === 'english' && selectedEnglishIndex === originalIndex) {
-            console.log('Deselecting English paragraph');
-            setSelectedEnglishIndex(null); // Deselect the English paragraph
+            setSelectedEnglishIndex(null);
             setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
-            return; // Exit early, no further logic needed
+            return;
         } else if (language === 'hebrew' && selectedHebrewIndex === originalIndex) {
-            console.log('Deselecting Hebrew paragraph');
-            setSelectedHebrewIndex(null); // Deselect the Hebrew paragraph
+            setSelectedHebrewIndex(null);
             setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
-            return; // Exit early, no further logic needed
+            return;
         }
          let currentSelectedEnglish = selectedEnglishIndex;
          let currentSelectedHebrew = selectedHebrewIndex;
 
-         // Update the selection for the clicked language
          if (language === 'english') {
              currentSelectedEnglish = originalIndex;
-             console.log(`English paragraph ${originalIndex} selected`);
-         } else { // language === 'hebrew'
+         } else {
              currentSelectedHebrew = originalIndex;
-              console.log(`Hebrew paragraph ${originalIndex} selected`);
          }
 
-         // Determine if the newly selected pair can be confirmed
-         // Can confirm if one English and one Hebrew are selected.
          const englishSelected = currentSelectedEnglish !== null;
          const hebrewSelected = currentSelectedHebrew !== null;
          const newCanConfirmPair = englishSelected && hebrewSelected;
-         console.log(`Can Confirm Pair Check: engSel=${englishSelected}, hebSel=${hebrewSelected} -> Result=${newCanConfirmPair}`);
+         const newCanUnlink = false;
 
-         // Unlink logic might need re-evaluation based on how JSONL works.
-         // For now, let's keep it simple: can only confirm, not unlink confirmed pairs easily.
-         const newCanUnlink = false; // Disable unlinking for now
-
-         // Update state
          setSelectedEnglishIndex(currentSelectedEnglish);
          setSelectedHebrewIndex(currentSelectedHebrew);
          setCanConfirmPair(newCanConfirmPair);
          setCanUnlink(newCanUnlink);
-        setControlsDisabled(!newCanConfirmPair); // Controls enabled only if pair can be confirmed
-        console.log(`Controls state updated: canConfirmPair=${newCanConfirmPair}, canUnlink=${newCanUnlink}, disabled=${!newCanConfirmPair}`);
+        setControlsDisabled(!newCanConfirmPair);
      };
 
-     // Replaces handleLink
      const handleConfirmPair = () => {
          if (selectedEnglishIndex !== null && selectedHebrewIndex !== null && canConfirmPair) {
-             console.log(`Attempting to confirm pair: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}`);
-
-             // Find the actual paragraph text using the original indices
              const englishParaData = processedParagraphs.english.original.find(p => p.originalIndex === selectedEnglishIndex);
              const hebrewParaData = processedParagraphs.hebrew.original.find(p => p.originalIndex === selectedHebrewIndex);
 
              if (englishParaData && hebrewParaData) {
-                const enText = englishParaData.paragraph; // Use the original, non-normalized English
-                const heText = hebrewParaData.paragraph; // Use the original, normalized Hebrew
-
-                 // Create the JSONL record string
+                const enText = englishParaData.paragraph;
+                const heText = hebrewParaData.paragraph;
                  const record = {
                      messages: [
                          { role: 'system', content: 'Translate Rudolf Steiner lecture paragraphs from English to Hebrew.' },
-                         { role: 'user', content: enText }, // English paragraph
-                         { role: 'assistant', content: heText } // Hebrew paragraph
+                         { role: 'user', content: enText },
+                         { role: 'assistant', content: heText }
                      ]
                  };
                  const jsonlString = JSON.stringify(record);
-
-                 // Add the record to the state
                  setJsonlRecords(prevRecords => [...prevRecords, jsonlString]);
-                 console.log(`Pair confirmed and added to JSONL records: ${jsonlString}`);
                  toast({
                     title: "Pair Confirmed",
-                    description: `English paragraph ${selectedEnglishIndex + 1} and Hebrew paragraph ${selectedHebrewIndex + 1} added to export list.`,
+                    description: `Paragraph pair added to export list.`,
                     duration: 2000,
                  });
 
-
-                 // --- Remove the confirmed paragraphs from display ---
-                 // Add their original indices to the hidden set
                  const newHidden = {
                      english: new Set(hiddenIndices.english).add(selectedEnglishIndex),
                      hebrew: new Set(hiddenIndices.hebrew).add(selectedHebrewIndex)
                  };
                  setHiddenIndices(newHidden);
 
-                 // Recalculate displayed paragraphs
                  setProcessedParagraphs(prev => ({
                      english: {
                          original: prev.english.original,
-                         displayed: filterMetadata(prev.english.original, newHidden.english),
+                         displayed: filterMetadata(prev.english.original, newHidden.english).map(item => ({...item})), // No scoring props
                      },
                      hebrew: {
                          original: prev.hebrew.original,
-                         displayed: filterMetadata(prev.hebrew.original, newHidden.hebrew),
+                         displayed: filterMetadata(prev.hebrew.original, newHidden.hebrew).map(item => ({...item})), // No scoring props
                      },
                  }));
-                 console.log(`Removed confirmed paragraphs (Eng: ${selectedEnglishIndex}, Heb: ${selectedHebrewIndex}) from display.`);
 
-
-                 // Clear selections and button states after confirming
                  setSelectedEnglishIndex(null);
                  setSelectedHebrewIndex(null);
                  setCanConfirmPair(false);
@@ -488,32 +427,24 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  setControlsDisabled(true);
 
              } else {
-                 console.error("Could not find paragraph data for selected indices.");
                  toast({
                     title: "Confirmation Error",
-                    description: "Could not retrieve paragraph text for confirmation.",
+                    description: "Could not retrieve paragraph text.",
                     variant: "destructive",
                     duration: 2000,
                  });
              }
-         } else {
-            console.warn(`Confirmation conditions not met: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}, canConfirm=${canConfirmPair}`);
          }
      };
 
-
-      // handleUnlink might be removed or repurposed depending on workflow
       const handleUnlink = () => {
-         console.warn("Unlink functionality is currently disabled or under review for JSONL workflow.");
+         console.warn("Unlink functionality is currently disabled.");
          toast({
             title: "Action Disabled",
-            description: "Unlinking confirmed pairs is not directly supported in this workflow.",
+            description: "Unlinking is not supported.",
             variant: "destructive",
             duration: 2000,
          });
-         // If needed, implement logic to remove a specific record from jsonlRecords based on selection,
-         // and potentially unhide the corresponding paragraphs. This would be complex.
-         // For now, clear selections.
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
          setCanConfirmPair(false);
@@ -522,137 +453,23 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      };
 
 
-     const handleSuggest = async () => {
-         if (!englishText || !hebrewText) {
-             console.warn("Cannot suggest alignment: Texts not loaded.");
-              toast({
-                title: "Suggestion Error",
-                description: "Please load both texts before suggesting alignments.",
-                variant: "destructive",
-                duration: 2000,
-            });
-             return;
-         }
-
-         setIsSuggesting(true);
-         setControlsDisabled(true); // Disable controls during suggestion
-         setSuggestedAlignments(null); // Clear previous suggestions
-         console.log("Starting AI suggestion...");
-          toast({
-            title: "AI Suggestion Started",
-            description: "Asking the AI to suggest paragraph alignments...",
-            duration: 2000,
-        });
-
-
-         try {
-             // Use the Genkit flow for suggestions
-             const { suggestParagraphAlignment } = await import('@/ai/flows/suggest-paragraph-alignment');
-
-             // Create the texts with double newlines as expected by the AI prompt
-             // Use ORIGINAL paragraphs (non-normalized English, normalized Hebrew) for the AI
-             const englishTextForAI = processedParagraphs.english.original
-                                         .filter(p => !hiddenIndices.english.has(p.originalIndex)) // Filter out already hidden/confirmed
-                                         .map(p => p.paragraph).join('\n\n');
-             const hebrewTextForAI = processedParagraphs.hebrew.original
-                                         .filter(p => !hiddenIndices.hebrew.has(p.originalIndex)) // Filter out already hidden/confirmed
-                                         .map(p => p.paragraph).join('\n\n');
-
-             console.log(`Sending text to AI (excluding hidden/confirmed): Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
-
-             const suggestions = await suggestParagraphAlignment({
-                 englishText: englishTextForAI,
-                 hebrewText: hebrewTextForAI,
-             });
-             console.log(`Raw AI Suggestions received: ${suggestions.length} suggestions`);
-
-             // Filter suggestions to only include those involving non-hidden paragraphs
-             // The AI returns indices based on the *filtered* text it received.
-             // We need to map these back to the *original* indices.
-              const mapFilteredIndexToOriginal = (filteredIndex: number, language: 'english' | 'hebrew'): number | null => {
-                  const displayed = language === 'english' ? processedParagraphs.english.displayed : processedParagraphs.hebrew.displayed;
-                  if (filteredIndex >= 0 && filteredIndex < displayed.length) {
-                      return displayed[filteredIndex].originalIndex;
-                  }
-                  return null;
-              };
-
-              const validSuggestions = suggestions.map(s => {
-                   const originalEngIndex = mapFilteredIndexToOriginal(s.englishParagraphIndex, 'english');
-                   const originalHebIndex = mapFilteredIndexToOriginal(s.hebrewParagraphIndex, 'hebrew');
-
-                   if (originalEngIndex !== null && originalHebIndex !== null) {
-                       return {
-                           ...s,
-                           englishParagraphIndex: originalEngIndex,
-                           hebrewParagraphIndex: originalHebIndex,
-                       };
-                   }
-                   return null; // Invalid mapping, filter out
-               }).filter(s => s !== null) as SuggestedAlignment[]; // Type assertion after filtering nulls
-
-             console.log(`Valid AI Suggestions (mapped to original indices): ${validSuggestions.length} suggestions`);
-
-             setSuggestedAlignments(validSuggestions);
-              toast({
-                title: "AI Suggestions Ready",
-                description: `Received ${validSuggestions.length} alignment suggestions.`,
-                duration: 2000,
-            });
-
-             // Clear specific highlights for single suggestion
-             setHighlightedSuggestionIndex(null);
-             setHighlightedSuggestionTargetIndex(null);
-
-
-         } catch (error: any) {
-             console.error("Failed to get AI suggestions:", error);
-             toast({
-                title: "AI Suggestion Failed",
-                description: error.message || "An error occurred while getting suggestions.",
-                variant: "destructive",
-                duration: 2000,
-            });
-             setSuggestedAlignments([]); // Clear suggestions on error
-         } finally {
-             setIsSuggesting(false);
-             // Reset controls state based on current selection (if any)
-            const engSelected = selectedEnglishIndex !== null;
-            const hebSelected = selectedHebrewIndex !== null;
-            const currentCanConfirm = engSelected && hebSelected;
-            const currentCanUnlink = false; // Keep unlink disabled
-
-             console.log(`Resetting controls after suggest: engSel=${engSelected}, hebSel=${hebSelected}, currentCanConfirm=${currentCanConfirm}, currentCanUnlink=${currentCanUnlink}`);
-             setCanConfirmPair(currentCanConfirm);
-             setCanUnlink(currentCanUnlink);
-             setControlsDisabled(!currentCanConfirm); // Enable only if confirm is possible
-         }
-     };
-
-
      const handleDropParagraph = (originalIndex: number, language: 'english' | 'hebrew') => {
-         console.log(`Hiding paragraph: Lang=${language}, OriginalIdx=${originalIndex}`);
           toast({
             title: "Paragraph Hidden",
-            description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph ${originalIndex + 1} hidden.`,
+            description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph hidden.`,
             duration: 2000,
         });
 
-
-         // Update the hidden indices state immutably
-         const currentHiddenLang = hiddenIndices[language] || new Set(); // Ensure it's a Set
+         const currentHiddenLang = hiddenIndices[language] || new Set();
          const updatedHidden = new Set(currentHiddenLang);
          updatedHidden.add(originalIndex);
          const newHiddenIndicesState = { ...hiddenIndices, [language]: updatedHidden };
-         setHiddenIndices(newHiddenIndicesState); // This will trigger the useLocalStorage update
+         setHiddenIndices(newHiddenIndicesState);
 
 
-         // Recalculate displayed paragraphs based on the *new* hidden indices state
           setProcessedParagraphs(prev => {
-             console.log(`Updating displayed paragraphs after hiding ${language} ${originalIndex}`);
-             const newEnglishDisplayed = filterMetadata(prev.english.original, newHiddenIndicesState.english);
-             const newHebrewDisplayed = filterMetadata(prev.hebrew.original, newHiddenIndicesState.hebrew);
-             console.log(`New counts: Eng=${newEnglishDisplayed.length}, Heb=${newHebrewDisplayed.length}`);
+             const newEnglishDisplayed = filterMetadata(prev.english.original, newHiddenIndicesState.english).map(item => ({...item})); // No scoring props
+             const newHebrewDisplayed = filterMetadata(prev.hebrew.original, newHiddenIndicesState.hebrew).map(item => ({...item})); // No scoring props
              return {
                  english: {
                      original: prev.english.original,
@@ -665,408 +482,279 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              };
          });
 
-
-         // Clear selection if the dropped paragraph was selected
          let engStillSelected = selectedEnglishIndex;
          let hebStillSelected = selectedHebrewIndex;
          if (language === 'english' && selectedEnglishIndex === originalIndex) {
-            console.log(`Deselecting English ${originalIndex} because it was hidden.`);
             setSelectedEnglishIndex(null);
             engStillSelected = null;
          } else if (language === 'hebrew' && selectedHebrewIndex === originalIndex) {
-             console.log(`Deselecting Hebrew ${originalIndex} because it was hidden.`);
              setSelectedHebrewIndex(null);
              hebStillSelected = null;
          }
 
-         // Filter out suggested alignments involving this paragraph
-         const updatedSuggestedAlignments = suggestedAlignments?.filter(suggestion =>
-            !(suggestion.englishParagraphIndex === originalIndex || suggestion.hebrewParagraphIndex === originalIndex)
-         ) ?? null;
-          if (suggestedAlignments && (!updatedSuggestedAlignments || updatedSuggestedAlignments.length < suggestedAlignments.length)) {
-              console.log(`Removed suggested alignments involving hidden paragraph ${originalIndex}.`);
-              setSuggestedAlignments(updatedSuggestedAlignments);
-          }
-
-
-         // Recalculate button states after dropping and clearing selection
          const engSelectedAfterDrop = engStillSelected !== null;
          const hebSelectedAfterDrop = hebStillSelected !== null;
          const currentCanConfirm = engSelectedAfterDrop && hebSelectedAfterDrop;
-         const currentCanUnlink = false; // Keep unlink disabled
+         const currentCanUnlink = false;
 
-          console.log(`Resetting controls after drop: engSel=${engSelectedAfterDrop}, hebSel=${hebSelectedAfterDrop}, currentCanConfirm=${currentCanConfirm}, currentCanUnlink=${currentCanUnlink}`);
          setCanConfirmPair(currentCanConfirm);
          setCanUnlink(currentCanUnlink);
          setControlsDisabled(!currentCanConfirm);
-
      };
 
-     // --- MERGE FUNCTIONALITY ---
      const handleMergeUp = (displayedIndex: number) => {
-        console.log(`Attempting to merge Hebrew paragraph ${displayedIndex} UP`);
         if (displayedIndex <= 0) {
-             toast({
-                title: "Merge Error",
-                description: "Cannot merge the first paragraph up.",
-                variant: "destructive",
-                duration: 2000,
-            });
-             return; // Cannot merge up the first paragraph
+             toast({ title: "Merge Error", description: "Cannot merge the first paragraph up.", variant: "destructive", duration: 2000 });
+             return;
         }
 
         setProcessedParagraphs(prev => {
-            const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
-             if (displayedIndex >= displayedHebrew.length) return prev; // Index out of bounds check
-
+            const displayedHebrew = [...prev.hebrew.displayed];
             const targetParagraphData = displayedHebrew[displayedIndex - 1];
             const sourceParagraphData = displayedHebrew[displayedIndex];
+            const mergedText = `${targetParagraphData.paragraph} ${sourceParagraphData.paragraph}`; // Single space merge
+            const targetOriginalIndex = targetParagraphData.originalIndex;
+            const sourceOriginalIndex = sourceParagraphData.originalIndex;
 
-            // Create the merged paragraph text using normalized text, WITHOUT double newline
-            const mergedText = `${targetParagraphData.paragraph} ${sourceParagraphData.paragraph}`;
+            const newOriginalHebrew = prev.hebrew.original.map(p =>
+                p.originalIndex === targetOriginalIndex ? { ...p, paragraph: mergedText } : p
+            ).filter(p => p.originalIndex !== sourceOriginalIndex);
 
-             // Update the original paragraph list (find by originalIndex and update text)
-             const targetOriginalIndex = targetParagraphData.originalIndex;
-             const sourceOriginalIndex = sourceParagraphData.originalIndex;
-             const newOriginalHebrew = prev.hebrew.original.map(p =>
-                 p.originalIndex === targetOriginalIndex ? { ...p, paragraph: mergedText } : p
-             ).filter(p => p.originalIndex !== sourceOriginalIndex); // Remove the original source paragraph
-
-            // Remove the source paragraph from the displayed list and update the target
              const newDisplayedHebrew = displayedHebrew
-                .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText } : p) // Update target in displayed list
-                .filter((_, idx) => idx !== displayedIndex); // Remove source from displayed list
+                .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText } : p) // No scoring props
+                .filter((_, idx) => idx !== displayedIndex);
 
+             const newHebrewHidden = new Set(hiddenIndices.hebrew);
+             newHebrewHidden.delete(sourceOriginalIndex);
 
-            // --- Update Alignments ---
-            // Remove any suggested alignments involving the *source* paragraph's original index
-            const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== sourceOriginalIndex) ?? null;
-
-            // --- Update Hidden Indices ---
-            // Remove the source paragraph's original index from hidden set if present
-            const newHebrewHidden = new Set(hiddenIndices.hebrew);
-            newHebrewHidden.delete(sourceOriginalIndex);
-
-
-            // --- Update State ---
-            setSuggestedAlignments(newSuggestedAlignments);
-            setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden })); // Persist hidden index change
-            setSelectedHebrewIndex(null); // Deselect Hebrew after merge
-            setSelectedEnglishIndex(null); // Deselect English too for consistency
+            setSelectedHebrewIndex(null);
+            setSelectedEnglishIndex(null);
             setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
+            setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
 
-            toast({
-                title: "Paragraphs Merged",
-                description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex}.`,
-                duration: 2000,
-            });
-            console.log(`Merged up: Target originalIdx=${targetOriginalIndex}, Source originalIdx=${sourceOriginalIndex}`);
+            toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged.`, duration: 2000 });
 
             return {
                  ...prev,
                  hebrew: {
-                    original: newOriginalHebrew, // Use updated original list
-                    displayed: newDisplayedHebrew, // Use updated displayed list
+                    original: newOriginalHebrew,
+                    displayed: newDisplayedHebrew,
                  },
             };
         });
      };
 
       const handleMergeDown = (displayedIndex: number) => {
-        console.log(`Attempting to merge Hebrew paragraph ${displayedIndex} DOWN`);
         setProcessedParagraphs(prev => {
-             const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
+             const displayedHebrew = [...prev.hebrew.displayed];
              if (displayedIndex >= displayedHebrew.length - 1) {
-                  toast({
-                    title: "Merge Error",
-                    description: "Cannot merge the last paragraph down.",
-                    variant: "destructive",
-                    duration: 2000,
-                });
-                  return prev; // Cannot merge down the last paragraph
+                  toast({ title: "Merge Error", description: "Cannot merge the last paragraph down.", variant: "destructive", duration: 2000 });
+                  return prev;
              }
 
             const sourceParagraphData = displayedHebrew[displayedIndex];
             const targetParagraphData = displayedHebrew[displayedIndex + 1];
-
-            // Concatenate the already normalized paragraphs, WITHOUT double newline
-            const mergedText = `${sourceParagraphData.paragraph} ${targetParagraphData.paragraph}`;
-
-            // Update the original paragraph list (find source by originalIndex, update text, remove target)
+            const mergedText = `${sourceParagraphData.paragraph} ${targetParagraphData.paragraph}`; // Single space merge
             const sourceOriginalIndex = sourceParagraphData.originalIndex;
             const targetOriginalIndex = targetParagraphData.originalIndex;
+
              const newOriginalHebrew = prev.hebrew.original.map(p =>
                  p.originalIndex === sourceOriginalIndex ? { ...p, paragraph: mergedText } : p
-             ).filter(p => p.originalIndex !== targetOriginalIndex); // Remove the original target paragraph
+             ).filter(p => p.originalIndex !== targetOriginalIndex);
 
-            // Remove the target paragraph from the displayed list and update the source
              const newDisplayedHebrew = displayedHebrew
-                .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText } : p) // Update source in displayed list
-                .filter((_, idx) => idx !== displayedIndex + 1); // Remove target from displayed list
+                .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText } : p) // No scoring props
+                .filter((_, idx) => idx !== displayedIndex + 1);
 
-            // --- Update Alignments ---
-            const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== targetOriginalIndex) ?? null;
-
-             // --- Update Hidden Indices ---
              const newHebrewHidden = new Set(hiddenIndices.hebrew);
              newHebrewHidden.delete(targetOriginalIndex);
 
-            // --- Update State ---
-            setSuggestedAlignments(newSuggestedAlignments);
-             setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
             setSelectedHebrewIndex(null);
             setSelectedEnglishIndex(null);
             setCanConfirmPair(false);
             setCanUnlink(false);
             setControlsDisabled(true);
+             setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
 
-             toast({
-                title: "Paragraphs Merged",
-                description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex + 2}.`,
-                duration: 2000,
-            });
-             console.log(`Merged down: Source originalIdx=${sourceOriginalIndex}, Target originalIdx=${targetOriginalIndex}`);
-
+             toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged.`, duration: 2000 });
 
             return {
                  ...prev,
                  hebrew: {
-                    original: newOriginalHebrew, // Use updated original list
-                    displayed: newDisplayedHebrew, // Use updated displayed list
+                    original: newOriginalHebrew,
+                    displayed: newDisplayedHebrew,
                  },
              };
         });
      };
 
-     // --- END MERGE FUNCTIONALITY ---
-
-     // --- DOWNLOAD JSONL FUNCTIONALITY ---
       const handleDownloadJsonl = () => {
          if (jsonlRecords.length === 0) {
-             toast({
-                title: "Download Error",
-                description: "No confirmed pairs to download.",
-                variant: "destructive",
-                duration: 2000,
-            });
+             toast({ title: "Download Error", description: "No confirmed pairs to download.", variant: "destructive", duration: 2000 });
              return;
          }
-
          setIsDownloading(true);
          try {
-             // Join the stored JSONL strings with newlines
-             const jsonlContent = jsonlRecords.join('\n') + '\n'; // Ensure trailing newline
-
+             const jsonlContent = jsonlRecords.join('\n') + '\n';
              const blob = new Blob([jsonlContent], { type: "application/jsonl;charset=utf-8" });
-             saveAs(blob, "fine_tune.jsonl"); // Use the filename from the example
-             toast({
-                title: "Download Started",
-                description: "Downloading fine_tune.jsonl file.",
-                duration: 2000,
-            });
-
+             saveAs(blob, "fine_tune.jsonl");
+             toast({ title: "Download Started", description: "Downloading fine_tune.jsonl file.", duration: 2000 });
          } catch (error: any) {
-             console.error("Failed to generate JSONL download:", error);
-             toast({
-                title: "Download Failed",
-                description: error.message || "An error occurred while generating the download file.",
-                variant: "destructive",
-                duration: 2000,
-            });
+             toast({ title: "Download Failed", description: error.message || "Error generating download.", variant: "destructive", duration: 2000 });
          } finally {
              setIsDownloading(false);
          }
      };
-     // --- END DOWNLOAD JSONL FUNCTIONALITY ---
 
-     // --- START FRESH FUNCTIONALITY ---
      const handleStartFresh = () => {
-         console.log("Clearing JSONL records from localStorage and resetting state...");
-         // Clear specific localStorage key for JSONL records
          localStorage.removeItem('jsonlRecords');
-
-         // Reset component state related to pairing and suggestions
          setJsonlRecords([]);
+         // Reset selection and controls, but keep loaded texts and their hidden indices
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
-         setSuggestedAlignments(null); // Clear suggestions as well
-         setHighlightedSuggestionIndex(null);
-         setHighlightedSuggestionTargetIndex(null);
          setCanConfirmPair(false);
          setCanUnlink(false);
          setControlsDisabled(true);
 
-         // Reset hidden indices to only include automatically detected metadata
-         // Re-run the metadata detection logic based on current paragraphs if texts are loaded
-         const initialHidden = { english: new Set<number>(), hebrew: new Set<number>() };
+          // Re-apply initial metadata filtering if texts are loaded
          if (textsAreLoaded) {
+             const initialHidden = { english: new Set<number>(), hebrew: new Set<number>() };
              processedParagraphs.english.original.forEach(item => {
                  const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) {
-                     initialHidden.english.add(item.originalIndex);
-                 }
+                 if (wordCount <= 20) initialHidden.english.add(item.originalIndex);
              });
              processedParagraphs.hebrew.original.forEach(item => {
                  const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) {
-                     initialHidden.hebrew.add(item.originalIndex);
-                 }
+                 if (wordCount <= 20) initialHidden.hebrew.add(item.originalIndex);
              });
-             setHiddenIndices(initialHidden);
-
-             // Update displayed paragraphs based on reset hidden indices
+              setHiddenIndices(initialHidden); // Keep existing hidden unless starting fresh
              setProcessedParagraphs(prev => ({
                  english: {
                      original: prev.english.original,
-                     displayed: filterMetadata(prev.english.original, initialHidden.english),
+                      displayed: filterMetadata(prev.english.original, initialHidden.english).map(item => ({...item})), // No scoring props
                  },
                  hebrew: {
                      original: prev.hebrew.original,
-                     displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew),
+                      displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew).map(item => ({...item})), // No scoring props
                  },
              }));
-         } else {
-             // If texts are not loaded, just reset hiddenIndices state
-             setHiddenIndices(initialHidden);
-             setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } });
          }
+         // If texts aren't loaded yet, startFresh just clears JSONL records. Hidden indices will be set on fetch.
 
 
-         toast({
-            title: "Started Pairing Fresh",
-            description: "Cleared confirmed pairs. You can start pairing again.",
-            duration: 2000,
-        });
+         toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs.", duration: 2000 });
      };
-     // --- END START FRESH FUNCTIONALITY ---
 
 
-     // New useEffect for scroll synchronization
+     // --- END SCORING FUNCTIONALITY ---
+
+
+     // Scroll synchronization logic (remains largely the same)
      useEffect(() => {
         if (!isScrollSyncEnabled) {
-            console.log('Scroll Sync: Disabled by user preference.');
-            return; // Skip setting up listeners if disabled
+            console.log('Scroll Sync: Disabled.');
+            return;
         }
 
-        const englishScrollViewport = englishPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
-        const hebrewScrollViewport = hebrewPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+        const englishViewport = englishPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+        const hebrewViewport = hebrewPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
 
-        if (!englishScrollViewport || !hebrewScrollViewport) {
-            // console.log('Scroll Sync: Viewports not ready yet.');
-            return; // Exit if viewports aren't found
+        if (!englishViewport || !hebrewViewport) {
+            return;
         }
         console.log('Scroll Sync: Viewports found, adding listeners.');
 
 
-        // Logic for finding the top-most *visible* paragraph index in the viewport
         const getTopVisibleDisplayedIndex = (viewport: HTMLElement, panelRef: React.RefObject<HTMLDivElement>): number => {
-            if (!viewport || !panelRef.current) return -1;
-            const viewportRect = viewport.getBoundingClientRect();
-            const paragraphElements = Array.from(panelRef.current.querySelectorAll('.paragraph-box')) as HTMLElement[];
+             if (!viewport || !panelRef.current) return -1;
+             const viewportRect = viewport.getBoundingClientRect();
+             const paragraphElements = Array.from(panelRef.current.querySelectorAll('.paragraph-box')) as HTMLElement[];
 
-            for (let i = 0; i < paragraphElements.length; i++) {
-                const pElement = paragraphElements[i];
-                const pRect = pElement.getBoundingClientRect();
-                // Find the first paragraph whose top is AT OR JUST ABOVE the viewport top
-                 if (pRect.top >= viewportRect.top) {
-                    // console.log(`Top visible element found at index ${i}:`, pElement);
-                    return i;
-                }
-            }
-             // If loop completes, it means all paragraphs are above the viewport top.
-             // Return the index of the last paragraph if any exist.
-            return paragraphElements.length > 0 ? paragraphElements.length - 1 : -1;
+             for (let i = 0; i < paragraphElements.length; i++) {
+                 const pElement = paragraphElements[i];
+                 const pRect = pElement.getBoundingClientRect();
+                  if (pRect.top >= viewportRect.top) {
+                     return i;
+                 }
+             }
+             return paragraphElements.length > 0 ? paragraphElements.length - 1 : -1;
         };
 
 
-        const syncScroll = (sourceViewport: HTMLElement, targetViewport: HTMLElement, sourcePanelRef: React.RefObject<HTMLDivElement>, targetPanelRef: React.RefObject<HTMLDivElement>, targetParagraphsData: { paragraph: string; originalIndex: number }[]) => {
+        const syncScroll = (sourceViewport: HTMLElement, targetViewport: HTMLElement, sourcePanelRef: React.RefObject<HTMLDivElement>, targetPanelRef: React.RefObject<HTMLDivElement>) => {
             const currentDisplayedIndex = getTopVisibleDisplayedIndex(sourceViewport, sourcePanelRef);
-            console.log(`Sync Scroll: Source top displayed index: ${currentDisplayedIndex}`);
-             if (currentDisplayedIndex === -1 || !targetViewport || !targetPanelRef.current || targetParagraphsData.length === 0) {
-                console.log(`Sync Scroll: Cannot sync - Invalid source index (${currentDisplayedIndex}), target viewport missing, or no target paragraphs.`);
+             if (currentDisplayedIndex === -1 || !targetViewport || !targetPanelRef.current) {
+                console.log(`Sync Scroll: Cannot sync - Invalid source index or target missing.`);
                 return;
             }
 
             const targetParagraphElements = Array.from(targetPanelRef.current.querySelectorAll('.paragraph-box')) as HTMLElement[];
-            // Find the paragraph in the target panel with the *same displayed index*
-            const targetElement = targetParagraphElements[currentDisplayedIndex]; // Direct mapping by displayed index
+            const targetElement = targetParagraphElements[currentDisplayedIndex];
 
             if (targetElement) {
-                // Calculate scroll position to bring the target element's top exactly to the viewport's top
-                const targetTopRelativeToScrollContainer = targetElement.offsetTop;
-                // We want targetElement.offsetTop to be equal to targetViewport.scrollTop
-                const scrollToPosition = targetTopRelativeToScrollContainer;
-
-                console.log(`Sync Scroll: Scrolling target viewport to bring displayed index ${currentDisplayedIndex} (offsetTop ${targetTopRelativeToScrollContainer}) to the top.`);
-                targetViewport.scrollTo({ top: scrollToPosition, behavior: 'auto' }); // Use 'auto' for instant programmatic scroll
+                const scrollToPosition = targetElement.offsetTop;
+                console.log(`Sync Scroll: Scrolling target to displayed index ${currentDisplayedIndex} (offsetTop ${scrollToPosition}).`);
+                targetViewport.scrollTo({ top: scrollToPosition, behavior: 'auto' });
             } else {
-                 // Fallback: If exact index match fails, scroll to the top/bottom or nearest available
                 const fallbackIndex = Math.min(currentDisplayedIndex, targetParagraphElements.length - 1);
                  if (fallbackIndex >= 0) {
                      const fallbackElement = targetParagraphElements[fallbackIndex];
-                     const fallbackTop = fallbackElement.offsetTop; // Fallback element's top relative to scroll container
+                     const fallbackTop = fallbackElement.offsetTop;
                      console.log(`Sync Scroll: Target element at index ${currentDisplayedIndex} not found. Falling back to index ${fallbackIndex} at offsetTop ${fallbackTop}.`);
                      targetViewport.scrollTo({ top: fallbackTop, behavior: 'auto' });
                  } else {
-                     console.log(`Sync Scroll: Target index ${currentDisplayedIndex} (and fallback) out of bounds or element not found.`);
+                     console.log(`Sync Scroll: Target index ${currentDisplayedIndex} (and fallback) out of bounds.`);
                  }
             }
         };
 
         let englishScrollTimeout: NodeJS.Timeout | null = null;
         let hebrewScrollTimeout: NodeJS.Timeout | null = null;
-        let isProgrammaticScroll = false; // Flag to prevent feedback loops
+        let isProgrammaticScroll = false;
 
         const handleEnglishScroll = () => {
-            if (isProgrammaticScroll) return; // Ignore programmatic scrolls
-            // console.log('User scroll: English');
+            if (isProgrammaticScroll) return;
             if (englishScrollTimeout) clearTimeout(englishScrollTimeout);
             englishScrollTimeout = setTimeout(() => {
-                console.log('Scroll Sync: Triggered by English scroll.');
-                 isProgrammaticScroll = true; // Set flag before syncing
-                 syncScroll(englishScrollViewport, hebrewScrollViewport, englishPanelRef, hebrewPanelRef, processedParagraphs.hebrew.displayed);
-                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay, slightly longer to let scroll settle
-            }, 100); // Debounce/throttle time
+                 isProgrammaticScroll = true;
+                 syncScroll(englishViewport, hebrewViewport, englishPanelRef, hebrewPanelRef);
+                 setTimeout(() => isProgrammaticScroll = false, 150);
+            }, 100);
         };
 
         const handleHebrewScroll = () => {
-            if (isProgrammaticScroll) return; // Ignore programmatic scrolls
-            // console.log('User scroll: Hebrew');
+            if (isProgrammaticScroll) return;
              if (hebrewScrollTimeout) clearTimeout(hebrewScrollTimeout);
              hebrewScrollTimeout = setTimeout(() => {
-                 console.log('Scroll Sync: Triggered by Hebrew scroll.');
-                 isProgrammaticScroll = true; // Set flag before syncing
-                 syncScroll(hebrewScrollViewport, englishScrollViewport, hebrewPanelRef, englishPanelRef, processedParagraphs.english.displayed);
-                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay, slightly longer to let scroll settle
-             }, 100); // Debounce/throttle time
+                 isProgrammaticScroll = true;
+                 syncScroll(hebrewViewport, englishViewport, hebrewPanelRef, englishPanelRef);
+                 setTimeout(() => isProgrammaticScroll = false, 150);
+             }, 100);
         };
 
 
-        englishScrollViewport.addEventListener('scroll', handleEnglishScroll);
-        hebrewScrollViewport.addEventListener('scroll', handleHebrewScroll);
+        englishViewport.addEventListener('scroll', handleEnglishScroll);
+        hebrewViewport.addEventListener('scroll', handleHebrewScroll);
          console.log('Scroll Sync: Event listeners added.');
 
          return () => {
-            englishScrollViewport?.removeEventListener('scroll', handleEnglishScroll);
-            hebrewScrollViewport?.removeEventListener('scroll', handleHebrewScroll);
+            englishViewport?.removeEventListener('scroll', handleEnglishScroll);
+            hebrewViewport?.removeEventListener('scroll', handleHebrewScroll);
             if (englishScrollTimeout) clearTimeout(englishScrollTimeout);
             if (hebrewScrollTimeout) clearTimeout(hebrewScrollTimeout);
              console.log('Scroll Sync: Event listeners removed.');
          };
-    // Rerun effect if paragraphs change, viewports become available, OR scroll sync is toggled
     }, [englishPanelRef, hebrewPanelRef, processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed, isScrollSyncEnabled]);
 
 
      return (
          <div className="flex flex-col h-screen p-4 bg-background">
-             {/* URL Input Section - Reduced Size */}
+             {/* URL Input Section */}
              <Card className="mb-4 shadow-sm">
-                 <CardHeader className="py-2 px-3 border-b"> {/* Optional: Add header for visual separation */}
-                     {/* Optionally add a title like <CardTitle className="text-sm">Load Texts</CardTitle> */}
-                 </CardHeader>
-                 <CardContent className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 items-end"> {/* Changed to 5 cols */}
+                 <CardHeader className="py-2 px-3 border-b" />
+                 <CardContent className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 items-end">
                      <div className="space-y-1">
                          <Label htmlFor="english-url" className="text-xs">English URL</Label>
                          <Input
@@ -1075,7 +763,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="English URL"
                              value={englishUrl}
                              onChange={handleEnglishUrlChange}
-                             disabled={isFetching || isSuggesting || isDownloading}
+                             disabled={isFetching || isDownloading} // Removed scoring check
                              className="h-8 text-sm"
                          />
                      </div>
@@ -1087,45 +775,35 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="Hebrew URL"
                              value={hebrewUrl}
                              onChange={handleHebrewUrlChange}
-                             disabled={isFetching || isSuggesting || isDownloading}
+                             disabled={isFetching || isDownloading} // Removed scoring check
                              dir="rtl"
                              className="h-8 text-sm"
                          />
                      </div>
                      <Button
                          onClick={handleFetchTexts}
-                         disabled={isFetching || isSuggesting || isDownloading || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Handle null/undefined case for trim
+                         disabled={isFetching || isDownloading || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Removed scoring check
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
                      >
-                         {isFetching ? (
-                             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                         ) : (
-                             <DownloadCloud className="mr-1 h-3 w-3" />
-                         )}
+                         {isFetching ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <DownloadCloud className="mr-1 h-3 w-3" />}
                          {isFetching ? 'Fetching...' : 'Fetch'}
                      </Button>
-                      {/* Download JSONL Button */}
                       <Button
                          onClick={handleDownloadJsonl}
-                         disabled={isDownloading || jsonlRecords.length === 0 || isFetching || isSuggesting}
+                         disabled={isDownloading || jsonlRecords.length === 0 || isFetching} // Removed scoring check
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
-                         variant="outline" // Use outline variant for download
+                         variant="outline"
                      >
-                         {isDownloading ? (
-                             <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                         ) : (
-                             <DownloadCloud className="mr-1 h-3 w-3" />
-                         )}
+                         {isDownloading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <DownloadCloud className="mr-1 h-3 w-3" />}
                          {isDownloading ? 'Preparing...' : `Download Pairs (${jsonlRecords.length})`}
                      </Button>
-                     {/* Start Fresh Button */}
                      <AlertDialog>
                          <AlertDialogTrigger asChild>
                              <Button
                                  variant="destructive"
-                                 disabled={isFetching || isSuggesting || isDownloading || !textsAreLoaded} // Also disable if texts not loaded
+                                 disabled={isFetching || isDownloading || !textsAreLoaded} // Removed scoring check
                                  className="w-full sm:w-auto h-8 text-xs"
                                  size="sm"
                              >
@@ -1137,7 +815,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              <AlertDialogHeader>
                                  <AlertDialogTitle>Clear Confirmed Pairs?</AlertDialogTitle>
                                  <AlertDialogDescription>
-                                     This action cannot be undone. This will permanently delete all confirmed pairs from this session stored in your browser's local storage and reset the pairing process. The original fetched texts will remain.
+                                     This will clear all confirmed pairs from this session. Original texts and hidden paragraphs remain.
                                  </AlertDialogDescription>
                              </AlertDialogHeader>
                              <AlertDialogFooter>
@@ -1158,19 +836,15 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          displayedParagraphs={processedParagraphs.english.displayed}
                          isLoading={isFetching && englishText === null}
                          selectedOriginalIndex={selectedEnglishIndex}
-                         onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         suggestedAlignments={suggestedAlignments}
-                         suggestionKey="englishParagraphIndex"
-                         highlightedSuggestionIndex={highlightedSuggestionIndex}
-                         linkedHighlightIndex={highlightedSuggestionTargetIndex}
+                         onParagraphSelect={handleParagraphSelect}
                          isSourceLanguage={true}
                          loadedText={englishText}
                          language="english"
                          onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.english}
-                         panelRef={englishPanelRef} // Pass ref
-                         isScrollSyncEnabled={isScrollSyncEnabled} // Pass down
-                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)} // Pass down toggle handler
+                         panelRef={englishPanelRef}
+                         isScrollSyncEnabled={isScrollSyncEnabled}
+                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)}
                      />
                  </div>
 
@@ -1181,35 +855,27 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          displayedParagraphs={processedParagraphs.hebrew.displayed}
                          isLoading={isFetching && hebrewText === null}
                          selectedOriginalIndex={selectedHebrewIndex}
-                         onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         suggestedAlignments={suggestedAlignments}
-                         suggestionKey="hebrewParagraphIndex"
-                         highlightedSuggestionIndex={highlightedSuggestionTargetIndex} // Highlight based on target
-                         linkedHighlightIndex={highlightedSuggestionIndex} // Link based on source
+                         onParagraphSelect={handleParagraphSelect}
                          showControls={true}
-                         onConfirmPair={handleConfirmPair} // Pass confirm handler instead of link
-                         onUnlink={handleUnlink} // Still passing, might be removed later
-                         onSuggest={handleSuggest}
-                         canConfirmPair={canConfirmPair} // Use confirm state
+                         onConfirmPair={handleConfirmPair}
+                         onUnlink={handleUnlink}
+                         canConfirmPair={canConfirmPair}
                          canUnlink={canUnlink}
-                         isSuggesting={isSuggesting}
-                         hasSuggestions={suggestedAlignments !== null}
-                         controlsDisabled={controlsDisabled || !textsAreLoaded} // Also disable if texts aren't loaded
+                         controlsDisabled={controlsDisabled || !textsAreLoaded} // Removed scoring check
                          isSourceLanguage={false}
                          loadedText={hebrewText}
                          language="hebrew"
                          onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.hebrew}
-                         panelRef={hebrewPanelRef} // Pass ref
-                         isScrollSyncEnabled={isScrollSyncEnabled} // Pass down
-                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)} // Pass down toggle handler
-                         // Pass merge handlers only to Hebrew panel
+                         panelRef={hebrewPanelRef}
+                         isScrollSyncEnabled={isScrollSyncEnabled}
+                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)}
                          onMergeUp={handleMergeUp}
                          onMergeDown={handleMergeDown}
+                         // Removed scoring related props
                      />
                  </div>
              </div>
          </div>
      );
  }
-
