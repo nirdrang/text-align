@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -280,8 +278,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setEnglishText(null); // Reset text state
          setHebrewText(null); // Reset text state
          setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } }); // Reset paragraphs
-         // Optionally clear JSONL records for new text, or keep them cumulative? Let's keep them for now.
-         // setJsonlRecords([]);
+         // Clear JSONL records when fetching new text
+         setJsonlRecords([]);
          setSuggestedAlignments(null);
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
@@ -357,7 +355,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          } finally {
              setIsFetching(false);
          }
-     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setHiddenIndices, toast]); // Removed setManualAlignments from deps as it's not used for linking anymore
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setHiddenIndices, setJsonlRecords, toast]); // Add setJsonlRecords
 
      // This useEffect runs when the debounced URLs change
      useEffect(() => {
@@ -813,38 +812,52 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
      // --- START FRESH FUNCTIONALITY ---
      const handleStartFresh = () => {
-         console.log("Clearing localStorage and resetting state...");
-         // Clear specific localStorage keys related to this app
-         localStorage.removeItem('englishUrl');
-         localStorage.removeItem('hebrewUrl');
+         console.log("Clearing JSONL records from localStorage and resetting state...");
+         // Clear specific localStorage key for JSONL records
          localStorage.removeItem('jsonlRecords');
-         localStorage.removeItem('hiddenIndices');
-         localStorage.removeItem('isScrollSyncEnabled');
-         // Could also clear all localStorage, but safer to be specific
-         // localStorage.clear();
 
-         // Reset component state
-         setEnglishUrl('');
-         setHebrewUrl('');
-         setEnglishText(null);
-         setHebrewText(null);
-         setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } });
+         // Reset component state related to pairing and suggestions
+         setJsonlRecords([]);
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
-         setJsonlRecords([]);
-         setSuggestedAlignments(null);
+         setSuggestedAlignments(null); // Clear suggestions as well
          setHighlightedSuggestionIndex(null);
          setHighlightedSuggestionTargetIndex(null);
          setCanConfirmPair(false);
          setCanUnlink(false);
          setControlsDisabled(true);
-         setHiddenIndices({ english: new Set(), hebrew: new Set() });
-         setIsScrollSyncEnabled(true); // Reset to default if desired
-         setIsFetching(false);
-         setIsSuggesting(false);
-         setIsDownloading(false);
 
-         toast({ title: "Started Fresh", description: "Cleared stored data and reset the application." });
+         // Reset hidden indices to only include automatically detected metadata
+         // Re-run the metadata detection logic based on current paragraphs
+         const initialHidden = { english: new Set<number>(), hebrew: new Set<number>() };
+         processedParagraphs.english.original.forEach(item => {
+             const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+             if (wordCount <= 20) {
+                 initialHidden.english.add(item.originalIndex);
+             }
+         });
+         processedParagraphs.hebrew.original.forEach(item => {
+             const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+             if (wordCount <= 20) {
+                 initialHidden.hebrew.add(item.originalIndex);
+             }
+         });
+         setHiddenIndices(initialHidden);
+
+         // Update displayed paragraphs based on reset hidden indices
+         setProcessedParagraphs(prev => ({
+             english: {
+                 original: prev.english.original,
+                 displayed: filterMetadata(prev.english.original, initialHidden.english),
+             },
+             hebrew: {
+                 original: prev.hebrew.original,
+                 displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew),
+             },
+         }));
+
+
+         toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs. You can start pairing again." });
      };
      // --- END START FRESH FUNCTIONALITY ---
 
@@ -1031,19 +1044,19 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          <AlertDialogTrigger asChild>
                              <Button
                                  variant="destructive"
-                                 disabled={isFetching || isSuggesting || isDownloading}
+                                 disabled={isFetching || isSuggesting || isDownloading || !textsAreLoaded} // Also disable if texts not loaded
                                  className="w-full sm:w-auto h-8 text-xs"
                                  size="sm"
                              >
                                  <Eraser className="mr-1 h-3 w-3" />
-                                 Start Fresh
+                                 Start Pairing Fresh
                              </Button>
                          </AlertDialogTrigger>
                          <AlertDialogContent>
                              <AlertDialogHeader>
-                                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                 <AlertDialogTitle>Clear Confirmed Pairs?</AlertDialogTitle>
                                  <AlertDialogDescription>
-                                     This action cannot be undone. This will permanently delete all persisted data (URLs, confirmed pairs, hidden paragraphs) from your browser's local storage and reset the application.
+                                     This action cannot be undone. This will permanently delete all confirmed pairs from this session stored in your browser's local storage and reset the pairing process. The original fetched texts will remain.
                                  </AlertDialogDescription>
                              </AlertDialogHeader>
                              <AlertDialogFooter>
@@ -1118,4 +1131,3 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          </div>
      );
  }
-
