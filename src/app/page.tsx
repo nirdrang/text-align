@@ -12,6 +12,9 @@ import { fetchTextFromUrl } from '@/actions/fetch-text'; // Import the server ac
 import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
 import { useToast } from '@/hooks/use-toast';
 
+const ENGLISH_URL_STORAGE_KEY = 'text-aligner-english-url';
+const HEBREW_URL_STORAGE_KEY = 'text-aligner-hebrew-url';
+
 export default function Home() {
   const [englishUrl, setEnglishUrl] = useState('');
   const [hebrewUrl, setHebrewUrl] = useState('');
@@ -32,6 +35,42 @@ export default function Home() {
   const hebrewPanelRef = useRef<HTMLDivElement>(null);
 
   const { toast } = useToast();
+
+  // --- Load URLs from localStorage on mount ---
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const savedEnglishUrl = localStorage.getItem(ENGLISH_URL_STORAGE_KEY);
+      const savedHebrewUrl = localStorage.getItem(HEBREW_URL_STORAGE_KEY);
+      if (savedEnglishUrl) {
+        console.log('[Page] Loaded English URL from localStorage:', savedEnglishUrl);
+        setEnglishUrl(savedEnglishUrl);
+      }
+      if (savedHebrewUrl) {
+        console.log('[Page] Loaded Hebrew URL from localStorage:', savedHebrewUrl);
+        setHebrewUrl(savedHebrewUrl);
+      }
+    }
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Handlers to update state and save to localStorage
+  const handleEnglishUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newUrl = e.target.value;
+    setEnglishUrl(newUrl);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(ENGLISH_URL_STORAGE_KEY, newUrl);
+      console.log('[Page] Saved English URL to localStorage:', newUrl);
+    }
+  };
+
+  const handleHebrewUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newUrl = e.target.value;
+    setHebrewUrl(newUrl);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.setItem(HEBREW_URL_STORAGE_KEY, newUrl);
+      console.log('[Page] Saved Hebrew URL to localStorage:', newUrl);
+    }
+  };
+
 
   // Split text into paragraphs based on double line breaks
   const englishParagraphs = useMemo(() => {
@@ -337,7 +376,7 @@ export default function Home() {
               type="url"
               placeholder="https://example.com/english-text"
               value={englishUrl}
-              onChange={(e) => setEnglishUrl(e.target.value)}
+              onChange={handleEnglishUrlChange} // Use the new handler
               disabled={isFetching || isSuggesting}
             />
           </div>
@@ -348,7 +387,7 @@ export default function Home() {
               type="url"
               placeholder="https://example.com/hebrew-text"
               value={hebrewUrl}
-              onChange={(e) => setHebrewUrl(e.target.value)}
+              onChange={handleHebrewUrlChange} // Use the new handler
               disabled={isFetching || isSuggesting}
               dir="rtl" // Set direction for Hebrew input
             />
