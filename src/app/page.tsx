@@ -1,29 +1,34 @@
+
 'use client';
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import TextAreaPanel from '@/components/text-area-panel';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Loader2, DownloadCloud } from 'lucide-react';
 import { suggestParagraphAlignment } from '@/ai/flows/suggest-paragraph-alignment';
-import { fetchTextFromUrl } from '@/actions/fetch-text'; // Import the server action
+import { fetchTextFromUrl } from '@/actions/fetch-text';
 import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
 import { useToast } from '@/hooks/use-toast';
 
 const ENGLISH_URL_STORAGE_KEY = 'text-aligner-english-url';
 const HEBREW_URL_STORAGE_KEY = 'text-aligner-hebrew-url';
+const MAX_METADATA_PARAGRAPHS_TO_CHECK = 5; // Check the first 5 paragraphs
+const MAX_METADATA_WORDS = 20; // Max words for a paragraph to be considered metadata
 
 // Function to split text into paragraphs based on double newlines
-// Consistent with the logic expected by the AI flow
 const splitTextIntoParagraphs = (text: string | null): string[] => {
     if (!text) return [];
-    // Split by two or more newline characters (\n\n, \n\n\n, etc.), potentially surrounded by whitespace.
-    // Filter out empty strings resulting from multiple splits or leading/trailing breaks.
     return text.split(/\s*\n{2,}\s*/)
-               .map(p => p.trim()) // Trim whitespace from each potential paragraph
-               .filter(p => p.length > 0); // Keep only non-empty paragraphs
+               .map(p => p.trim())
+               .filter(p => p.length > 0);
+};
+
+// Helper function to count words
+const countWords = (text: string): number => {
+    return text.split(/\s+/).filter(Boolean).length;
 };
 
 
@@ -34,15 +39,22 @@ export default function Home() {
   const [hebrewText, setHebrewText] = useState<string | null>(null);
   const [isFetching, setIsFetching] = useState(false);
 
+  // Store ORIGINAL indices of selected paragraphs
   const [selectedEnglishIndex, setSelectedEnglishIndex] = useState<number | null>(null);
   const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
+
+  // Store ORIGINAL indices of hidden/dropped paragraphs
+  const [hiddenIndices, setHiddenIndices] = useState<{ english: Set<number>; hebrew: Set<number> }>({ english: new Set(), hebrew: new Set() });
+
+  // Store alignments using ORIGINAL indices
   const [manualAlignments, setManualAlignments] = useState<ManualAlignment[]>([]);
   const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
+
+  // Highlighting uses ORIGINAL indices
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
   const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
 
-  // Refs for panel containers to attach listeners
   const englishPanelRef = useRef<HTMLDivElement>(null);
   const hebrewPanelRef = useRef<HTMLDivElement>(null);
 
@@ -62,9 +74,8 @@ export default function Home() {
         setHebrewUrl(savedHebrewUrl);
       }
     }
-  }, []); // Empty dependency array ensures this runs only once on mount
+  }, []);
 
-  // Handlers to update state and save to localStorage
   const handleEnglishUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newUrl = e.target.value;
     setEnglishUrl(newUrl);
@@ -83,21 +94,39 @@ export default function Home() {
     }
   };
 
+  // --- Processed Paragraphs for Display (Filtering Included) ---
+  const processedParagraphs = useMemo(() => {
+      const processLang = (text: string | null, lang: 'english' | 'hebrew') => {
+          const allParagraphs = splitTextIntoParagraphs(text);
+          const metadataIndices = new Set<number>();
+          const userHidden = hiddenIndices[lang];
 
-  // Split text into paragraphs using the consistent function
-  const englishParagraphs = useMemo(() => {
-      const paragraphs = splitTextIntoParagraphs(englishText);
-      console.log(`[Page] Generated ${paragraphs.length} English paragraphs.`);
-      // paragraphs.forEach((p, i) => console.log(`  Eng Para ${i} (len ${p.length}): "${p.substring(0, 50)}..."`));
-      return paragraphs;
-  }, [englishText]);
+          // Identify metadata paragraphs
+          for (let i = 0; i < Math.min(allParagraphs.length, MAX_METADATA_PARAGRAPHS_TO_CHECK); i++) {
+              if (countWords(allParagraphs[i]) <= MAX_METADATA_WORDS) {
+                  metadataIndices.add(i);
+                  console.log(`[Page] Marked ${lang} paragraph ${i} as metadata (short).`);
+              }
+          }
 
-  const hebrewParagraphs = useMemo(() => {
-      const paragraphs = splitTextIntoParagraphs(hebrewText);
-      console.log(`[Page] Generated ${paragraphs.length} Hebrew paragraphs.`);
-      // paragraphs.forEach((p, i) => console.log(`  Heb Para ${i} (len ${p.length}): "${p.substring(0, 50)}..."`));
-      return paragraphs;
-  }, [hebrewText]);
+          const combinedHiddenIndices = new Set([...userHidden, ...metadataIndices]);
+
+          const displayed = allParagraphs
+              .map((p, i) => ({ paragraph: p, originalIndex: i }))
+              .filter(item => !combinedHiddenIndices.has(item.originalIndex));
+
+          console.log(`[Page] Processed ${lang}: ${allParagraphs.length} total, ${metadataIndices.size} metadata, ${userHidden.size} user hidden, ${displayed.length} displayed.`);
+          return { all: allParagraphs, displayed: displayed, hiddenSet: combinedHiddenIndices };
+      };
+
+      const englishResult = processLang(englishText, 'english');
+      const hebrewResult = processLang(hebrewText, 'hebrew');
+
+      return {
+          english: englishResult,
+          hebrew: hebrewResult,
+      };
+  }, [englishText, hebrewText, hiddenIndices]);
 
 
   const textsAreLoaded = englishText !== null && hebrewText !== null;
@@ -113,7 +142,8 @@ export default function Home() {
     }
     console.log('[Page] Starting text fetch...');
     setIsFetching(true);
-    setEnglishText(null); // Reset state immediately
+    // Reset EVERYTHING on new fetch
+    setEnglishText(null);
     setHebrewText(null);
     setManualAlignments([]);
     setSuggestedAlignments(null);
@@ -121,6 +151,7 @@ export default function Home() {
     setSelectedHebrewIndex(null);
     setHighlightedSuggestionIndex(null);
     setHighlightedSuggestionTargetIndex(null);
+    setHiddenIndices({ english: new Set(), hebrew: new Set() }); // Reset hidden paragraphs
 
     try {
       console.log(`[Page] Fetching English URL: ${englishUrl}`);
@@ -130,16 +161,13 @@ export default function Home() {
         fetchTextFromUrl(hebrewUrl),
       ]);
       console.log('[Page] Fetches completed.');
-      // console.log('[Page] English Result Raw:', englishResult); // Log raw results for debugging
-      // console.log('[Page] Hebrew Result Raw:', hebrewResult);
-
 
       let hasError = false;
       if (englishResult.error || !englishResult.text) {
         const errorMsg = englishResult.error || "Could not fetch or parse English text.";
         console.error(`[Page] Fetch Error (English): ${errorMsg}`);
         toast({ title: "Fetch Error (English)", description: errorMsg, variant: "destructive" });
-        setEnglishText(''); // Set to empty string on error to indicate load attempt failed but allow UI to render
+        setEnglishText('');
         hasError = true;
       } else {
         console.log(`[Page] Setting English text (raw length: ${englishResult.text.length})`);
@@ -150,7 +178,7 @@ export default function Home() {
          const errorMsg = hebrewResult.error || "Could not fetch or parse Hebrew text.";
         console.error(`[Page] Fetch Error (Hebrew): ${errorMsg}`);
         toast({ title: "Fetch Error (Hebrew)", description: errorMsg, variant: "destructive" });
-         setHebrewText(''); // Set to empty string on error
+         setHebrewText('');
         hasError = true;
       } else {
          console.log(`[Page] Setting Hebrew text (raw length: ${hebrewResult.text.length})`);
@@ -160,6 +188,7 @@ export default function Home() {
       if (!hasError) {
           console.log('[Page] Texts fetched successfully.');
           toast({ title: "Texts Fetched", description: "English and Hebrew texts loaded successfully." });
+          // Trigger metadata detection after successful fetch (handled by useMemo)
       } else {
           console.warn('[Page] One or both text fetches failed.');
       }
@@ -167,7 +196,7 @@ export default function Home() {
     } catch (error: any) {
       console.error("[Page] Unexpected error in handleFetchTexts:", error);
       toast({ title: "Fetch Error", description: `An unexpected error occurred: ${error.message || 'Unknown error'}`, variant: "destructive" });
-      setEnglishText(''); // Ensure text state is reset on unexpected error
+      setEnglishText('');
       setHebrewText('');
     } finally {
       console.log('[Page] Fetching process finished.');
@@ -176,78 +205,111 @@ export default function Home() {
   }, [englishUrl, hebrewUrl, toast]);
 
 
-  // --- Manual Linking Logic ---
+    // --- Mapping between displayed and original indices ---
+    const getOriginalIndex = useCallback((displayedIndex: number, language: 'english' | 'hebrew'): number | null => {
+        const item = processedParagraphs[language].displayed[displayedIndex];
+        return item ? item.originalIndex : null;
+    }, [processedParagraphs]);
 
-  const canLink = useMemo(() => {
-    if (selectedEnglishIndex === null || selectedHebrewIndex === null) return false;
-    // Cannot link if either paragraph is already linked
-    const isEnglishLinked = manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
-    const isHebrewLinked = manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
-    return !isEnglishLinked && !isHebrewLinked;
-  }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments]);
+    const getDisplayedIndex = useCallback((originalIndex: number, language: 'english' | 'hebrew'): number | null => {
+        const index = processedParagraphs[language].displayed.findIndex(item => item.originalIndex === originalIndex);
+        return index !== -1 ? index : null;
+    }, [processedParagraphs]);
 
-  const handleLink = useCallback(() => {
-    if (canLink && selectedEnglishIndex !== null && selectedHebrewIndex !== null) {
-      const newAlignment: ManualAlignment = { englishIndex: selectedEnglishIndex, hebrewIndex: selectedHebrewIndex };
-       console.log('[Page] Linking paragraphs:', newAlignment);
-      setManualAlignments(prev => [...prev, newAlignment]);
-      // Deselect after linking
-      setSelectedEnglishIndex(null);
-      setSelectedHebrewIndex(null);
-       toast({ title: "Paragraphs Linked", description: `English paragraph ${selectedEnglishIndex + 1} linked to Hebrew paragraph ${selectedHebrewIndex + 1}.` });
-    }
-  }, [canLink, selectedEnglishIndex, selectedHebrewIndex, toast]);
+    // --- Paragraph Selection ---
+    // Uses ORIGINAL indices internally, but receives DISPLAYED index from component
+    const handleParagraphSelect = useCallback((displayedIndex: number, language: 'english' | 'hebrew') => {
+        const originalIndex = getOriginalIndex(displayedIndex, language);
+        console.log(`[Page] Paragraph selected - Displayed Index: ${displayedIndex}, Original Index: ${originalIndex}, Language: ${language}`);
 
-  const canUnlink = useMemo(() => {
-    if (selectedEnglishIndex !== null) {
-       return manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
-    }
-     if (selectedHebrewIndex !== null) {
-         return manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
-     }
-    return false;
-  }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments]);
-
-
-  const handleUnlink = useCallback(() => {
-    let unlinked = false;
-     let engIdx = -1;
-     let hebIdx = -1;
-     let alignmentToRemove: ManualAlignment | undefined;
-
-     if (selectedEnglishIndex !== null) {
-        alignmentToRemove = manualAlignments.find(l => l.englishIndex === selectedEnglishIndex);
-        if (alignmentToRemove) {
-            engIdx = alignmentToRemove.englishIndex;
-            hebIdx = alignmentToRemove.hebrewIndex;
-            setManualAlignments(prev => prev.filter(l => l.englishIndex !== selectedEnglishIndex));
-            unlinked = true;
+        if (originalIndex === null) {
+            console.warn('[Page] Could not find original index for selected displayed index:', displayedIndex);
+            return;
         }
-     } else if (selectedHebrewIndex !== null) {
-         alignmentToRemove = manualAlignments.find(l => l.hebrewIndex === selectedHebrewIndex);
-        if (alignmentToRemove) {
-            engIdx = alignmentToRemove.englishIndex;
-            hebIdx = alignmentToRemove.hebrewIndex;
-            setManualAlignments(prev => prev.filter(l => l.hebrewIndex !== selectedHebrewIndex));
-            unlinked = true;
-        }
-     }
 
-    if (unlinked && alignmentToRemove) {
-        console.log('[Page] Unlinking paragraphs:', alignmentToRemove);
-        // Deselect after unlinking
+        if (language === 'english') {
+            setSelectedEnglishIndex(prev => (prev === originalIndex ? null : originalIndex));
+            setSelectedHebrewIndex(null); // Deselect other language
+        } else {
+            setSelectedHebrewIndex(prev => (prev === originalIndex ? null : originalIndex));
+            setSelectedEnglishIndex(null); // Deselect other language
+        }
+        setHighlightedSuggestionIndex(null);
+        setHighlightedSuggestionTargetIndex(null);
+    }, [getOriginalIndex]);
+
+    // --- Manual Linking Logic (Uses Original Indices) ---
+    const canLink = useMemo(() => {
+        if (selectedEnglishIndex === null || selectedHebrewIndex === null) return false;
+        const isEnglishLinked = manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
+        const isHebrewLinked = manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
+        return !isEnglishLinked && !isHebrewLinked;
+    }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments]);
+
+    const handleLink = useCallback(() => {
+        if (canLink && selectedEnglishIndex !== null && selectedHebrewIndex !== null) {
+        const newAlignment: ManualAlignment = { englishIndex: selectedEnglishIndex, hebrewIndex: selectedHebrewIndex };
+        console.log('[Page] Linking paragraphs (original indices):', newAlignment);
+        setManualAlignments(prev => [...prev, newAlignment]);
         setSelectedEnglishIndex(null);
         setSelectedHebrewIndex(null);
-        toast({ title: "Link Removed", description: `Link between English paragraph ${engIdx + 1} and Hebrew paragraph ${hebIdx + 1} removed.`, variant: "destructive" });
-    }
+        toast({ title: "Paragraphs Linked", description: `English paragraph ${getDisplayedIndex(selectedEnglishIndex, 'english')! + 1} linked to Hebrew paragraph ${getDisplayedIndex(selectedHebrewIndex, 'hebrew')! + 1}.` });
+        }
+    }, [canLink, selectedEnglishIndex, selectedHebrewIndex, toast, getDisplayedIndex]);
 
-  }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments, toast]);
+    const canUnlink = useMemo(() => {
+        if (selectedEnglishIndex !== null) {
+            return manualAlignments.some(link => link.englishIndex === selectedEnglishIndex);
+        }
+        if (selectedHebrewIndex !== null) {
+            return manualAlignments.some(link => link.hebrewIndex === selectedHebrewIndex);
+        }
+        return false;
+    }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments]);
 
+    const handleUnlink = useCallback(() => {
+        let unlinked = false;
+        let engIdx = -1;
+        let hebIdx = -1;
+        let alignmentToRemove: ManualAlignment | undefined;
+
+        if (selectedEnglishIndex !== null) {
+            alignmentToRemove = manualAlignments.find(l => l.englishIndex === selectedEnglishIndex);
+            if (alignmentToRemove) {
+                engIdx = alignmentToRemove.englishIndex;
+                hebIdx = alignmentToRemove.hebrewIndex;
+                setManualAlignments(prev => prev.filter(l => l.englishIndex !== selectedEnglishIndex));
+                unlinked = true;
+            }
+        } else if (selectedHebrewIndex !== null) {
+            alignmentToRemove = manualAlignments.find(l => l.hebrewIndex === selectedHebrewIndex);
+            if (alignmentToRemove) {
+                engIdx = alignmentToRemove.englishIndex;
+                hebIdx = alignmentToRemove.hebrewIndex;
+                setManualAlignments(prev => prev.filter(l => l.hebrewIndex !== selectedHebrewIndex));
+                unlinked = true;
+            }
+        }
+
+        if (unlinked && alignmentToRemove) {
+            console.log('[Page] Unlinking paragraphs (original indices):', alignmentToRemove);
+            setSelectedEnglishIndex(null);
+            setSelectedHebrewIndex(null);
+             const displayEngIdx = getDisplayedIndex(engIdx, 'english');
+             const displayHebIdx = getDisplayedIndex(hebIdx, 'hebrew');
+             // Only show toast if indices were found (they might have been hidden)
+             if (displayEngIdx !== null && displayHebIdx !== null) {
+                toast({ title: "Link Removed", description: `Link between English paragraph ${displayEngIdx + 1} and Hebrew paragraph ${displayHebIdx + 1} removed.`, variant: "destructive" });
+             } else {
+                 toast({ title: "Link Removed", description: `Link removed (one or both paragraphs may be hidden).`, variant: "destructive" });
+             }
+        }
+    }, [selectedEnglishIndex, selectedHebrewIndex, manualAlignments, toast, getDisplayedIndex]);
 
   // --- AI Suggestion Logic ---
-
   const handleSuggest = useCallback(async () => {
     console.log('[Page] handleSuggest triggered.');
+     // Use the *original unfiltered* texts for the AI
     if (!englishText || !hebrewText) {
         console.log('[Page] Suggestion attempted without text loaded.');
         toast({ title: "Missing Text", description: "Fetch English and Hebrew text first.", variant: "destructive" });
@@ -261,40 +323,48 @@ export default function Home() {
 
     try {
        console.log('[Page] Calling suggestParagraphAlignment flow...');
-       // Pass the *original* fetched texts (as received from fetchTextFromUrl) to the AI.
-       // The AI flow is expected to handle its own paragraph splitting based on the prompt instructions (using double newlines).
+        // Send the ORIGINAL texts to the AI
        const inputPayload = {
-         englishText: englishText || '', // Pass the raw fetched text
-         hebrewText: hebrewText || ''   // Pass the raw fetched text
+         englishText: englishText || '',
+         hebrewText: hebrewText || ''
        };
        console.log(`[Page] Payload for AI: Eng raw length ${inputPayload.englishText.length}, Heb raw length ${inputPayload.hebrewText.length}`);
 
       const suggestions = await suggestParagraphAlignment(inputPayload);
        console.log('[Page] Received suggestions from AI:', suggestions);
 
-       // Get current paragraph counts (based on frontend splitting) for validation
-       const currentEnglishParagraphCount = englishParagraphs.length;
-       const currentHebrewParagraphCount = hebrewParagraphs.length;
-       console.log(`[Page] Current paragraph counts for validation: Eng=${currentEnglishParagraphCount}, Heb=${currentHebrewParagraphCount}`);
+        // Suggestions have ORIGINAL indices. Validate against the total number of ORIGINAL paragraphs.
+        const totalEnglishParagraphs = processedParagraphs.english.all.length;
+        const totalHebrewParagraphs = processedParagraphs.hebrew.all.length;
+        console.log(`[Page] Total paragraph counts for validation: Eng=${totalEnglishParagraphs}, Heb=${totalHebrewParagraphs}`);
 
-      // Filter suggestions to only include valid paragraph indices based on the *frontend's current paragraph split*
-       const validSuggestions = suggestions.filter(s =>
-            s.englishParagraphIndex >= 0 && s.englishParagraphIndex < currentEnglishParagraphCount &&
-            s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < currentHebrewParagraphCount
-       );
+        // Filter suggestions:
+        // 1. Indices must be valid within the ORIGINAL total counts.
+        // 2. NEITHER paragraph in the suggestion should be in the HIDDEN sets.
+        const validSuggestions = suggestions.filter(s =>
+            s.englishParagraphIndex >= 0 && s.englishParagraphIndex < totalEnglishParagraphs &&
+            s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < totalHebrewParagraphs &&
+            !processedParagraphs.english.hiddenSet.has(s.englishParagraphIndex) && // Check if English paragraph is hidden
+            !processedParagraphs.hebrew.hiddenSet.has(s.hebrewParagraphIndex)    // Check if Hebrew paragraph is hidden
+        );
+
         if (validSuggestions.length !== suggestions.length) {
-            console.warn(`[Page] Filtered out ${suggestions.length - validSuggestions.length} invalid suggestions (indices out of bounds based on frontend paragraph split).`);
-            suggestions.forEach((s, idx) => {
-                 const isEngValid = s.englishParagraphIndex >= 0 && s.englishParagraphIndex < currentEnglishParagraphCount;
-                 const isHebValid = s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < currentHebrewParagraphCount;
-                 if (!isEngValid || !isHebValid) {
-                    console.warn(`  Suggestion ${idx}: EngIdx=${s.englishParagraphIndex} (Valid: ${isEngValid}, Max: ${currentEnglishParagraphCount - 1}), HebIdx=${s.hebrewParagraphIndex} (Valid: ${isHebValid}, Max: ${currentHebrewParagraphCount - 1})`);
+            console.warn(`[Page] Filtered out ${suggestions.length - validSuggestions.length} suggestions due to out-of-bounds indices or hidden paragraphs.`);
+             suggestions.forEach((s, idx) => {
+                 const isEngValidIdx = s.englishParagraphIndex >= 0 && s.englishParagraphIndex < totalEnglishParagraphs;
+                 const isHebValidIdx = s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < totalHebrewParagraphs;
+                 const isEngHidden = processedParagraphs.english.hiddenSet.has(s.englishParagraphIndex);
+                 const isHebHidden = processedParagraphs.hebrew.hiddenSet.has(s.hebrewParagraphIndex);
+                 if (!isEngValidIdx || !isHebValidIdx || isEngHidden || isHebHidden) {
+                    console.warn(`  Suggestion ${idx} Filtered: EngIdx=${s.englishParagraphIndex} (Valid: ${isEngValidIdx}, Hidden: ${isEngHidden}), HebIdx=${s.hebrewParagraphIndex} (Valid: ${isHebValidIdx}, Hidden: ${isHebHidden})`);
                  }
             });
         }
-      console.log(`[Page] Setting ${validSuggestions.length} valid suggestions.`);
-      setSuggestedAlignments(validSuggestions);
-      toast({ title: "Suggestions Ready", description: `${validSuggestions.length} alignment suggestions generated.` });
+
+        console.log(`[Page] Setting ${validSuggestions.length} valid suggestions.`);
+        // Store suggestions with ORIGINAL indices
+        setSuggestedAlignments(validSuggestions);
+        toast({ title: "Suggestions Ready", description: `${validSuggestions.length} alignment suggestions generated.` });
     } catch (error: any) {
       console.error("[Page] Error fetching suggestions:", error);
       toast({ title: "Suggestion Error", description: `Could not generate suggestions. Error: ${error.message || 'Unknown error'}. Please try again.`, variant: "destructive" });
@@ -303,63 +373,44 @@ export default function Home() {
        console.log('[Page] Suggestion process finished.');
       setIsSuggesting(false);
     }
-    // Depend on the raw texts and the derived paragraph counts
-  }, [englishText, hebrewText, toast, englishParagraphs.length, hebrewParagraphs.length]);
+  }, [englishText, hebrewText, toast, processedParagraphs]);
 
 
-  // --- Paragraph Selection and Highlighting ---
-
-   const handleParagraphSelect = useCallback((index: number, language: 'english' | 'hebrew') => {
-        console.log(`[Page] Paragraph selected - Index: ${index}, Language: ${language}`);
-        if (language === 'english') {
-            setSelectedEnglishIndex(prev => (prev === index ? null : index));
-            setSelectedHebrewIndex(null); // Deselect other language
-        } else {
-            setSelectedHebrewIndex(prev => (prev === index ? null : index));
-            setSelectedEnglishIndex(null); // Deselect other language
-        }
-         // Reset highlights on manual selection to avoid sticky highlights
-         setHighlightedSuggestionIndex(null);
-         setHighlightedSuggestionTargetIndex(null);
-    }, []);
-
-
-    // Highlight suggested pairs on hover (using useEffect for event listeners on refs)
+   // --- Highlighting Logic (Uses Original Indices) ---
     useEffect(() => {
         const englishPanel = englishPanelRef.current;
         const hebrewPanel = hebrewPanelRef.current;
-        let currentHighlightEng: number | null = null;
-        let currentHighlightHeb: number | null = null;
+        let currentHighlightEng: number | null = null; // Store original indices
+        let currentHighlightHeb: number | null = null; // Store original indices
 
-        const handlePointerMove = (event: PointerEvent) => { // Use PointerEvent for better touch/mouse handling
+        const handlePointerMove = (event: PointerEvent) => {
             if (!suggestedAlignments || isFetching || isSuggesting) return;
 
             const target = event.target as HTMLElement;
-            const paragraphDiv = target.closest('[data-paragraph-index]') as HTMLElement | null;
+            const paragraphDiv = target.closest('[data-original-index]') as HTMLElement | null; // Look for original index
 
             let newHighlightEng: number | null = null;
             let newHighlightHeb: number | null = null;
 
             if (paragraphDiv) {
-                const index = parseInt(paragraphDiv.dataset.paragraphIndex || '-1', 10);
-                const isEnglish = englishPanel?.contains(paragraphDiv); // Check if the paragraph is within the English panel
+                const originalIndex = parseInt(paragraphDiv.dataset.originalIndex || '-1', 10); // Get original index
+                const isEnglish = englishPanel?.contains(paragraphDiv);
 
-                if (index !== -1) {
+                if (originalIndex !== -1) {
+                    // Find suggestion based on the ORIGINAL index
                     const suggestion = suggestedAlignments.find(s =>
-                        isEnglish ? s.englishParagraphIndex === index : s.hebrewParagraphIndex === index
+                        isEnglish ? s.englishParagraphIndex === originalIndex : s.hebrewParagraphIndex === originalIndex
                     );
 
                     if (suggestion) {
-                        newHighlightEng = suggestion.englishParagraphIndex;
-                        newHighlightHeb = suggestion.hebrewParagraphIndex;
+                        newHighlightEng = suggestion.englishParagraphIndex; // Store original index
+                        newHighlightHeb = suggestion.hebrewParagraphIndex; // Store original index
                     }
                 }
             }
 
-            // Update state only if the highlight changes to avoid unnecessary re-renders
             if (newHighlightEng !== currentHighlightEng || newHighlightHeb !== currentHighlightHeb) {
-                 // console.log(`[Page] Highlighting pair: Eng ${newHighlightEng}, Heb ${newHighlightHeb}`);
-                 setHighlightedSuggestionIndex(newHighlightEng);
+                 setHighlightedSuggestionIndex(newHighlightEng); // Update state with original indices
                  setHighlightedSuggestionTargetIndex(newHighlightHeb);
                  currentHighlightEng = newHighlightEng;
                  currentHighlightHeb = newHighlightHeb;
@@ -367,9 +418,7 @@ export default function Home() {
         };
 
         const handlePointerLeave = () => {
-            // Clear highlights only if they are currently set
             if (currentHighlightEng !== null || currentHighlightHeb !== null) {
-                 // console.log('[Page] Clearing highlights on pointer leave.');
                  setHighlightedSuggestionIndex(null);
                  setHighlightedSuggestionTargetIndex(null);
                  currentHighlightEng = null;
@@ -378,7 +427,6 @@ export default function Home() {
         };
 
         if (textsAreLoaded && englishPanel && hebrewPanel) {
-          // Use pointermove for smoother updates and pointerleave for leaving the panel area
           englishPanel.addEventListener('pointermove', handlePointerMove);
           hebrewPanel.addEventListener('pointermove', handlePointerMove);
           englishPanel.addEventListener('pointerleave', handlePointerLeave);
@@ -395,48 +443,84 @@ export default function Home() {
         }
     }, [suggestedAlignments, textsAreLoaded, isFetching, isSuggesting]);
 
+    // --- Drop/Hide Paragraph Logic ---
+    const handleDropParagraph = useCallback((originalIndex: number, language: 'english' | 'hebrew') => {
+        console.log(`[Page] Dropping ${language} paragraph with original index: ${originalIndex}`);
+        setHiddenIndices(prev => {
+            const newSet = new Set(prev[language]);
+            newSet.add(originalIndex);
+            return { ...prev, [language]: newSet };
+        });
+
+        // Deselect if the dropped paragraph was selected
+        if (language === 'english' && selectedEnglishIndex === originalIndex) {
+            setSelectedEnglishIndex(null);
+        }
+        if (language === 'hebrew' && selectedHebrewIndex === originalIndex) {
+            setSelectedHebrewIndex(null);
+        }
+
+        // Remove any manual alignments involving this paragraph
+        setManualAlignments(prev => prev.filter(link =>
+            !(link.englishIndex === originalIndex && language === 'english') &&
+            !(link.hebrewIndex === originalIndex && language === 'hebrew')
+        ));
+
+         // Filter out suggestions involving this paragraph (optional, but good for consistency)
+         setSuggestedAlignments(prev => prev?.filter(s =>
+             !(s.englishParagraphIndex === originalIndex && language === 'english') &&
+             !(s.hebrewParagraphIndex === originalIndex && language === 'hebrew')
+         ) ?? null);
+
+
+         const displayedIndex = getDisplayedIndex(originalIndex, language);
+         toast({ title: "Paragraph Hidden", description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph ${displayedIndex !== null ? displayedIndex + 1 : '(original index '+ (originalIndex + 1) +')'} hidden.` });
+
+    }, [selectedEnglishIndex, selectedHebrewIndex, getDisplayedIndex, toast]);
+
+
   return (
     <div className="flex flex-col h-screen p-4 bg-background">
        {/* URL Input Section - Reduced Size */}
-       <Card className="mb-4 shadow-sm"> {/* Reduced shadow */}
-        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 items-end"> {/* Reduced padding/gap */}
+       <Card className="mb-4 shadow-sm">
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 items-end">
           <div className="space-y-1">
-            <Label htmlFor="english-url" className="text-xs">English URL</Label> {/* Smaller label */}
+            <Label htmlFor="english-url" className="text-xs">English URL</Label>
             <Input
               id="english-url"
               type="url"
-              placeholder="English URL" /* Shorter placeholder */
+              placeholder="English URL"
               value={englishUrl}
               onChange={handleEnglishUrlChange}
               disabled={isFetching || isSuggesting}
-              className="h-8 text-sm" /* Smaller input */
+              className="h-8 text-sm"
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="hebrew-url" className="text-xs">Hebrew URL</Label> {/* Smaller label */}
+            <Label htmlFor="hebrew-url" className="text-xs">Hebrew URL</Label>
             <Input
               id="hebrew-url"
               type="url"
-              placeholder="Hebrew URL" /* Shorter placeholder */
+              placeholder="Hebrew URL"
               value={hebrewUrl}
               onChange={handleHebrewUrlChange}
               disabled={isFetching || isSuggesting}
               dir="rtl"
-              className="h-8 text-sm" /* Smaller input */
+              className="h-8 text-sm"
             />
           </div>
           <Button
             onClick={handleFetchTexts}
             disabled={isFetching || isSuggesting || !englishUrl.trim() || !hebrewUrl.trim()}
-            className="w-full sm:w-auto h-8 text-xs" /* Smaller button */
-            size="sm" /* Use smaller size */
+            className="w-full sm:w-auto h-8 text-xs"
+            size="sm"
           >
             {isFetching ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" /> /* Smaller icon */
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
             ) : (
-              <DownloadCloud className="mr-1 h-3 w-3" /> /* Smaller icon */
+              <DownloadCloud className="mr-1 h-3 w-3" />
             )}
-            {isFetching ? 'Fetching...' : 'Fetch'} {/* Shorter text */}
+            {isFetching ? 'Fetching...' : 'Fetch'}
           </Button>
         </CardContent>
        </Card>
@@ -447,18 +531,23 @@ export default function Home() {
         <div ref={englishPanelRef} className="w-1/2 english-panel flex flex-col">
           <TextAreaPanel
             title="English"
-            paragraphs={englishParagraphs}
-            isLoading={isFetching && englishText === null} // Loading only if fetching AND text is still null
-            selectedIndex={selectedEnglishIndex}
-            onParagraphSelect={(index) => handleParagraphSelect(index, 'english')}
+             // Pass displayed paragraphs with original indices
+            displayedParagraphs={processedParagraphs.english.displayed}
+            isLoading={isFetching && englishText === null}
+             // Pass original index of selected paragraph
+            selectedOriginalIndex={selectedEnglishIndex}
+            onParagraphSelect={handleParagraphSelect}
             manualAlignments={manualAlignments}
             alignmentKey="englishIndex"
             suggestedAlignments={suggestedAlignments}
             suggestionKey="englishParagraphIndex"
             highlightedSuggestionIndex={highlightedSuggestionIndex}
             linkedHighlightIndex={highlightedSuggestionTargetIndex}
-            isSourceLanguage={true} // Indicate this is the source for structure
-            loadedText={englishText} // Pass loaded text state
+            isSourceLanguage={true}
+            loadedText={englishText}
+            language="english"
+            onDropParagraph={handleDropParagraph} // Pass drop handler
+            hiddenIndices={hiddenIndices.english} // Pass hidden indices
           />
         </div>
 
@@ -466,17 +555,19 @@ export default function Home() {
          <div ref={hebrewPanelRef} className="w-1/2 hebrew-panel flex flex-col">
           <TextAreaPanel
             title="Hebrew"
-            paragraphs={hebrewParagraphs}
-            isLoading={isFetching && hebrewText === null} // Loading only if fetching AND text is still null
-            selectedIndex={selectedHebrewIndex}
-            onParagraphSelect={(index) => handleParagraphSelect(index, 'hebrew')}
+             // Pass displayed paragraphs with original indices
+            displayedParagraphs={processedParagraphs.hebrew.displayed}
+            isLoading={isFetching && hebrewText === null}
+            // Pass original index of selected paragraph
+            selectedOriginalIndex={selectedHebrewIndex}
+            onParagraphSelect={handleParagraphSelect}
             manualAlignments={manualAlignments}
             alignmentKey="hebrewIndex"
             suggestedAlignments={suggestedAlignments}
             suggestionKey="hebrewParagraphIndex"
             highlightedSuggestionIndex={highlightedSuggestionTargetIndex}
             linkedHighlightIndex={highlightedSuggestionIndex}
-            showControls={true} // Pass flag to show controls
+            showControls={true}
             onLink={handleLink}
             onUnlink={handleUnlink}
             onSuggest={handleSuggest}
@@ -485,11 +576,16 @@ export default function Home() {
             isSuggesting={isSuggesting}
             hasSuggestions={suggestedAlignments !== null}
             controlsDisabled={controlsDisabled}
-            isSourceLanguage={false} // Indicate this is NOT the source
-            loadedText={hebrewText} // Pass loaded text state
+            isSourceLanguage={false}
+            loadedText={hebrewText}
+            language="hebrew"
+            onDropParagraph={handleDropParagraph} // Pass drop handler
+             hiddenIndices={hiddenIndices.hebrew} // Pass hidden indices
           />
         </div>
       </div>
     </div>
   );
 }
+
+    

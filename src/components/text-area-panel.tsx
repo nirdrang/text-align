@@ -1,3 +1,4 @@
+
 "use client";
 
 import type React from 'react';
@@ -10,20 +11,33 @@ import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
 import InlineAlignmentControls from './inline-alignment-controls'; // Import the new controls
 import ParagraphBox from './paragraph-box'; // Import the new component
 
+interface DisplayedParagraph {
+    paragraph: string;
+    originalIndex: number;
+}
+
 interface TextAreaPanelProps {
   title: string;
-  paragraphs: string[];
-  isLoading?: boolean; // Prop to indicate loading state
-  selectedIndex: number | null;
-  onParagraphSelect: (index: number) => void;
+  // Use displayed paragraphs with original index mapping
+  displayedParagraphs: DisplayedParagraph[];
+  isLoading?: boolean;
+  // Receive the ORIGINAL index of the selected paragraph
+  selectedOriginalIndex: number | null;
+  // Callback receives the DISPLAYED index and the language
+  onParagraphSelect: (displayedIndex: number, language: 'english' | 'hebrew') => void;
   manualAlignments: ManualAlignment[];
   alignmentKey: 'englishIndex' | 'hebrewIndex';
   suggestedAlignments: SuggestedAlignment[] | null;
   suggestionKey: 'englishParagraphIndex' | 'hebrewParagraphIndex';
+  // Highlight indices are ORIGINAL indices
   highlightedSuggestionIndex: number | null;
   linkedHighlightIndex: number | null;
-  isSourceLanguage: boolean; // New prop to identify the source language panel
-  loadedText: string | null; // Pass the loaded text state to check if loading was attempted
+  isSourceLanguage: boolean;
+  loadedText: string | null;
+  language: 'english' | 'hebrew'; // Explicitly pass language
+  // Callback receives the ORIGINAL index and language
+  onDropParagraph: (originalIndex: number, language: 'english' | 'hebrew') => void;
+  hiddenIndices: Set<number>; // Set of ORIGINAL hidden indices
 
   // Optional props for controls (passed to Hebrew panel)
   showControls?: boolean;
@@ -39,9 +53,9 @@ interface TextAreaPanelProps {
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   title,
-  paragraphs,
+  displayedParagraphs, // Use this prop
   isLoading = false,
-  selectedIndex,
+  selectedOriginalIndex, // Use this prop for selection check
   onParagraphSelect,
   manualAlignments,
   alignmentKey,
@@ -50,7 +64,10 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   highlightedSuggestionIndex,
   linkedHighlightIndex,
   isSourceLanguage,
-  loadedText, // Use this to determine initial/empty/error state
+  loadedText,
+  language, // Use this prop
+  onDropParagraph, // Use this prop
+  hiddenIndices, // Use this prop
   showControls = false,
   onLink,
   onUnlink,
@@ -62,35 +79,38 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   controlsDisabled = false,
 }) => {
 
-    // Determine display state based on loading and loadedText
+    // Determine display state based on loading and loadedText/displayedParagraphs
     const hasAttemptedLoad = loadedText !== null;
-    const hasContent = hasAttemptedLoad && paragraphs.length > 0;
-    const isEmptyAfterLoad = hasAttemptedLoad && paragraphs.length === 0;
+    const hasContent = hasAttemptedLoad && displayedParagraphs.length > 0;
+    const isEmptyAfterLoad = hasAttemptedLoad && displayedParagraphs.length === 0 && !isLoading;
 
-    const isManuallyAligned = (index: number): boolean => {
-        return manualAlignments.some((link) => link[alignmentKey] === index);
+    // Check manual alignment using ORIGINAL indices
+    const isManuallyAligned = (originalIndex: number): boolean => {
+        return manualAlignments.some((link) => link[alignmentKey] === originalIndex);
     };
 
-    const getLinkedPartnerIndex = (index: number): number | null => {
+    // Get linked partner's ORIGINAL index
+    const getLinkedPartnerIndex = (originalIndex: number): number | null => {
         const partnerKey = alignmentKey === 'englishIndex' ? 'hebrewIndex' : 'englishIndex';
-        const alignment = manualAlignments.find(link => link[alignmentKey] === index);
+        const alignment = manualAlignments.find(link => link[alignmentKey] === originalIndex);
         return alignment ? alignment[partnerKey] : null;
     };
 
-    const getSuggestionConfidence = (index: number): number | null => {
-        const suggestion = suggestedAlignments?.find(s => s[suggestionKey] === index);
+    // Check suggestion and get confidence using ORIGINAL indices
+    const getSuggestionConfidence = (originalIndex: number): number | null => {
+        const suggestion = suggestedAlignments?.find(s => s[suggestionKey] === originalIndex);
         return suggestion ? suggestion.confidence : null;
     };
 
-    const getSuggestionPartnerIndex = (index: number): number | null => {
+    // Get suggestion partner's ORIGINAL index
+    const getSuggestionPartnerIndex = (originalIndex: number): number | null => {
         if (!suggestedAlignments) return null;
         const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
-        const suggestion = suggestedAlignments.find(s => s[suggestionKey] === index);
+        const suggestion = suggestedAlignments.find(s => s[suggestionKey] === originalIndex);
         return suggestion ? suggestion[partnerKey] : null;
     }
 
     const getHighlightColor = (confidence: number): string => {
-        // Use a subtle green/blue tint for confidence
         const hue = 180 + 40 * confidence;
         const saturation = 50 + 20 * confidence;
         const lightness = 90;
@@ -98,10 +118,17 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
         return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
     };
 
+    // Helper to get displayed index from original index (for titles/tooltips)
+     const getDisplayedIndex = (originalIndex: number): number | null => {
+         const index = displayedParagraphs.findIndex(item => item.originalIndex === originalIndex);
+         return index !== -1 ? index : null;
+     };
+
+
     return (
         <Card className="flex flex-col h-full shadow-md">
-        <CardHeader className="flex flex-row items-center justify-between py-3 px-4"> {/* Reduced padding */}
-            <CardTitle className="text-lg">{title}</CardTitle> {/* Slightly smaller title */}
+        <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
+            <CardTitle className="text-lg">{title}</CardTitle>
             {showControls && onLink && onUnlink && onSuggest && (
             <InlineAlignmentControls
                 onLink={onLink}
@@ -115,40 +142,48 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
             />
             )}
         </CardHeader>
-        {/* Make CardContent grow and contain the ScrollArea */}
         <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
             <ScrollArea className="flex-grow px-4 pb-4">
-            {/* Added tabindex to make the container focusable */}
             <div className="space-y-2 outline-none" tabIndex={0}>
-                {isLoading ? ( // Primary loading state: spinner
+                {isLoading ? (
                 <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
                     <p className="text-muted-foreground">Loading {title} paragraphs...</p>
                 </div>
-                ) : !hasAttemptedLoad ? ( // Initial state: Before any fetch attempt
+                ) : !hasAttemptedLoad ? (
                 <div className="flex flex-col items-center justify-center h-full p-10 text-center">
                     <p className="text-muted-foreground">
                         {`Enter URLs above and click 'Fetch' to load the ${title} content.`}
                     </p>
                 </div>
-                ) : hasContent ? ( // Success state: paragraphs rendered
-                paragraphs.map((paragraph, index) => {
-                    const isSelected = selectedIndex === index;
-                    const manuallyAligned = isManuallyAligned(index);
-                    const linkedPartnerIndex = getLinkedPartnerIndex(index);
-                    const suggestionConfidence = getSuggestionConfidence(index);
+                 ) : isEmptyAfterLoad ? (
+                 <p className="text-muted-foreground p-3 text-center italic">
+                     {`No paragraphs detected or all paragraphs were filtered out as metadata in the ${title} text. Check URL, content structure, or metadata filtering settings.`}
+                 </p>
+                ) : hasContent ? (
+                 // Iterate over DISPLAYED paragraphs
+                displayedParagraphs.map((item, displayedIndex) => {
+                     const { paragraph, originalIndex } = item; // Get original index
+
+                    // Checks use ORIGINAL indices
+                    const isSelected = selectedOriginalIndex === originalIndex;
+                    const manuallyAligned = isManuallyAligned(originalIndex);
+                    const linkedPartnerOriginalIndex = getLinkedPartnerIndex(originalIndex);
+                    const suggestionConfidence = getSuggestionConfidence(originalIndex);
                     const isSuggested = suggestionConfidence !== null;
-                    const suggestionPartnerIndex = getSuggestionPartnerIndex(index);
-                    const isHighlightedSuggestion = highlightedSuggestionIndex === index;
-                    const isLinkedHighlight = linkedHighlightIndex === index;
+                    const suggestionPartnerOriginalIndex = getSuggestionPartnerIndex(originalIndex);
+                    const isHighlightedSuggestion = highlightedSuggestionIndex === originalIndex;
+                    const isLinkedHighlight = linkedHighlightIndex === originalIndex;
 
                     const highlightStyle: React.CSSProperties = {};
                     if ((isHighlightedSuggestion || isLinkedHighlight) && suggestedAlignments) {
+                         // Find confidence based on ORIGINAL indices
                         const confidence = isHighlightedSuggestion
                             ? suggestionConfidence
                             : suggestedAlignments.find(s => {
                                     const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
-                                    return s[partnerKey] === index && s[suggestionKey] === highlightedSuggestionIndex;
+                                     // Check against the correct partner index (which is the highlightedSuggestionIndex)
+                                    return s[partnerKey] === originalIndex && s[suggestionKey] === highlightedSuggestionIndex;
                                 })?.confidence ?? null;
 
                         if (confidence !== null) {
@@ -157,27 +192,36 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                         }
                     }
 
+                     // Get displayed indices for tooltips
+                     const linkedPartnerDisplayedIndex = linkedPartnerOriginalIndex !== null ? getDisplayedIndex(linkedPartnerOriginalIndex) : null;
+                     const suggestionPartnerDisplayedIndex = suggestionPartnerOriginalIndex !== null ? getDisplayedIndex(suggestionPartnerOriginalIndex) : null;
+
                     return (
-                    <ParagraphBox
-                        key={index}
-                        index={index}
-                        paragraph={paragraph}
-                        isSelected={isSelected}
-                        isManuallyAligned={manuallyAligned}
-                        isSuggested={isSuggested}
-                        isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight} // Combine highlight flags
-                        highlightStyle={highlightStyle}
-                        isHebrew={title === 'Hebrew'}
-                        onSelect={() => onParagraphSelect(index)}
-                        linkedPartnerIndex={linkedPartnerIndex}
-                        suggestionPartnerIndex={suggestionPartnerIndex}
-                        suggestionConfidence={suggestionConfidence}
-                    />
+                        <ParagraphBox
+                            key={originalIndex} // Use original index as key for stability
+                            displayedIndex={displayedIndex} // Pass displayed index for selection callback
+                            originalIndex={originalIndex} // Pass original index for data attributes and drop callback
+                            paragraph={paragraph}
+                            isSelected={isSelected}
+                            isManuallyAligned={manuallyAligned}
+                            isSuggested={isSuggested}
+                            isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight}
+                            highlightStyle={highlightStyle}
+                            isHebrew={title === 'Hebrew'}
+                            // Pass DISPLAYED index to selection handler
+                            onSelect={() => onParagraphSelect(displayedIndex, language)}
+                            // Pass DISPLAYED indices for tooltips
+                            linkedPartnerIndex={linkedPartnerDisplayedIndex}
+                            suggestionPartnerIndex={suggestionPartnerDisplayedIndex}
+                            suggestionConfidence={suggestionConfidence}
+                            // Pass ORIGINAL index to drop handler
+                            onDrop={() => onDropParagraph(originalIndex, language)}
+                        />
                     );
                 })
-                ) : ( // Empty/Error state: After fetch attempt, no paragraphs found
+                ) : ( // Should not be reached if isEmptyAfterLoad is correct, but kept as fallback
                 <p className="text-muted-foreground p-3 text-center italic">
-                    {`No paragraphs detected in the ${title} text. Fetch might have failed, the source might be empty, or the content structure is unexpected. Check URL and try again.`}
+                    An unexpected error occurred displaying paragraphs.
                 </p>
                 )}
             </div>
@@ -188,3 +232,5 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 };
 
 export default TextAreaPanel;
+
+    
