@@ -115,18 +115,13 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true); // Keep Nikud
                  // Log if normalization changed the text
                  if (originalParagraph !== normalizedParagraph) {
-                    console.log(`[Normalization] Hebrew Paragraph ${index + 1} Changed:`);
-                    console.log("  Before:", originalParagraph);
-                    console.log("  After: ", normalizedParagraph);
+                    console.log(`[Normalization] Hebrew Paragraph ${index + 1} Normalized:`);
+                    // console.log("  Before:", originalParagraph); // Uncomment for detailed debugging
+                    // console.log("  After: ", normalizedParagraph); // Uncomment for detailed debugging
                  }
               } else {
-                 normalizedParagraph = normalizePunctuation(originalParagraph); // Use general normalizer for English
-                  // Log if normalization changed the text (Optional: can be noisy for English)
-                 // if (originalParagraph !== normalizedParagraph) {
-                 //    console.log(`[Normalization] English Paragraph ${index + 1} Changed:`);
-                 //    console.log("  Before:", originalParagraph);
-                 //    console.log("  After: ", normalizedParagraph);
-                 // }
+                 // English text is treated as ground truth, no normalization applied
+                 normalizedParagraph = originalParagraph;
               }
               return normalizedParagraph;
          });
@@ -298,7 +293,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              // Only auto-hide if the sets were initially empty (i.e., first load or after reset)
              if (hiddenIndices.english.size === 0 && hiddenIndices.hebrew.size === 0) {
                  englishParagraphsWithIndices.forEach(item => {
-                     // Use the already normalized paragraph for word count
+                     // Use the *original* (non-normalized) paragraph for word count on English side
                      const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
                      if (wordCount <= 20) { // Identify metadata (short paragraphs)
                          newHiddenIndices.english.add(item.originalIndex);
@@ -306,7 +301,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                      }
                  });
                  hebrewParagraphsWithIndices.forEach(item => {
-                      // Use the already normalized paragraph for word count
+                      // Use the normalized paragraph for word count on Hebrew side
                      const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
                      if (wordCount <= 20) { // Identify metadata (short paragraphs)
                           newHiddenIndices.hebrew.add(item.originalIndex);
@@ -547,7 +542,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              const { suggestParagraphAlignment } = await import('@/ai/flows/suggest-paragraph-alignment');
 
              // Create the texts with double newlines as expected by the AI prompt
-             // Use ORIGINAL paragraphs (already normalized) for the AI
+             // Use ORIGINAL paragraphs (non-normalized English, normalized Hebrew) for the AI
              const englishTextForAI = processedParagraphs.english.original.map(p => p.paragraph).join('\n\n');
              const hebrewTextForAI = processedParagraphs.hebrew.original.map(p => p.paragraph).join('\n\n');
              console.log(`Sending text to AI: Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
