@@ -93,4 +93,3 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
 };
 
 export default InlineAlignmentControls;
-```

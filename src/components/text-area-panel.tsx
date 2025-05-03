@@ -13,12 +13,12 @@ import InlineAlignmentControls from './inline-alignment-controls'; // Import the
 
 interface TextAreaPanelProps {
   title: string;
-  text: string;
+  text: string | null; // Allow null for initial state before loading
   paragraphs: string[];
   onTextChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   readOnly?: boolean; // Added prop
-  showTextarea?: boolean; // Added prop
-  isLoading?: boolean; // Added prop
+  showTextarea?: boolean; // Prop to control Textarea visibility (now driven by `text !== null`)
+  isLoading?: boolean; // Prop to indicate loading state (when text is null and fetching)
   selectedIndex: number | null;
   onParagraphSelect: (index: number) => void;
   manualAlignments: ManualAlignment[];
@@ -41,12 +41,12 @@ interface TextAreaPanelProps {
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   title,
-  text,
+  text, // Can be null initially
   paragraphs,
   onTextChange,
   readOnly = false,
-  showTextarea = true,
-  isLoading = false,
+  // showTextarea prop is deprecated in favor of checking `text !== null`
+  isLoading = false, // True when fetching AND text is null
   selectedIndex,
   onParagraphSelect,
   manualAlignments,
@@ -65,6 +65,11 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   hasSuggestions = false,
   controlsDisabled = false,
 }) => {
+
+  const isTextLoaded = text !== null; // True if fetch was attempted (result could be empty string or actual text)
+  const hasContent = isTextLoaded && text.trim().length > 0;
+  const displayTextArea = isTextLoaded && !isLoading; // Show textarea if load attempt finished (even if error/empty)
+
   const isManuallyAligned = (index: number): boolean => {
     return manualAlignments.some((link) => link[alignmentKey] === index);
   };
@@ -116,13 +121,12 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
       </CardHeader>
       {/* Make CardContent grow and contain the ScrollArea */}
       <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
-        {showTextarea && (
+        {displayTextArea && ( // Show textarea only when text is loaded (even if empty) and not actively loading
           <div className="px-4 pt-0 pb-2"> {/* Adjust padding */}
-            {/* Textarea is hidden and shown based on prop, kept for potential future use */}
              <Textarea
-               value={text}
+               value={text ?? ''} // Use empty string if text is null but we decided to display
                onChange={onTextChange}
-               placeholder={isLoading ? `Loading ${title} text...` : `Paste ${title} text here or load from URL...`}
+               placeholder={isLoading ? `Loading ${title} text...` : `Loaded ${title} text. ${hasContent ? '' : '(Content appears empty or fetch failed)'}`}
                className="h-24 resize-none bg-card text-card-foreground" // Reduced height
                readOnly={readOnly || isLoading} // Make read-only if fetching or explicitly set
                disabled={isLoading} // Disable while loading
@@ -132,18 +136,18 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
         <ScrollArea className="flex-grow px-4 pb-4">
           {/* Added tabindex to make the container focusable for potential keyboard nav */}
           <div className="space-y-2 outline-none" tabIndex={0}>
-            {isLoading ? (
+            {isLoading ? ( // Primary loading state: spinner
               <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                  <p className="text-muted-foreground">Loading {title} paragraphs...</p>
               </div>
-            ) : !showTextarea ? (
+            ) : !isTextLoaded ? ( // Initial state: Before any fetch attempt
                <div className="flex flex-col items-center justify-center h-full p-10 text-center">
                  <p className="text-muted-foreground">
                     {`Enter URLs above and click 'Fetch Texts' to load the ${title} content.`}
                 </p>
                </div>
-            ) : paragraphs.length > 0 ? (
+            ) : paragraphs.length > 0 ? ( // Success state: paragraphs rendered
               paragraphs.map((paragraph, index) => {
                 const isSelected = selectedIndex === index;
                 const manuallyAligned = isManuallyAligned(index);
@@ -185,7 +189,6 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                         ? 'border-accent border-dashed' // Dashed for manual
                         : isSuggested ? 'border-primary/30 border-dotted' // Dotted for suggested
                         : 'border-border', // Default border
-                      // Removed animation class - rely on background/box-shadow directly
                     )}
                      style={highlightStyle}
                     data-paragraph-index={index}
@@ -203,15 +206,14 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                   </div>
                 );
               })
-            ) : (
+            ) : ( // Empty/Error state: After fetch attempt, no paragraphs found
               <p className="text-muted-foreground p-3 text-center italic">
-                {text === null ? `Load text to see paragraphs.` : `No paragraphs detected in the fetched text. Ensure the source content has paragraphs separated by double line breaks.`}
+                {`No paragraphs detected in the ${title} text. Fetch might have failed, the source might be empty, or the content structure is unexpected. Check URL and try again.`}
               </p>
             )}
           </div>
         </ScrollArea>
       </CardContent>
-       {/* Remove the separate style tag as animation is removed */}
     </Card>
   );
 };
