@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton
 import { Loader2 } from 'lucide-react'; // Import Loader
 import { cn } from '@/lib/utils';
 import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
+import InlineAlignmentControls from './inline-alignment-controls'; // Import the new controls
 
 interface TextAreaPanelProps {
   title: string;
@@ -26,6 +27,16 @@ interface TextAreaPanelProps {
   suggestionKey: 'englishParagraphIndex' | 'hebrewParagraphIndex';
   highlightedSuggestionIndex: number | null;
   linkedHighlightIndex: number | null;
+  // Optional props for controls (passed to Hebrew panel)
+  showControls?: boolean;
+  onLink?: () => void;
+  onUnlink?: () => void;
+  onSuggest?: () => void;
+  canLink?: boolean;
+  canUnlink?: boolean;
+  isSuggesting?: boolean;
+  hasSuggestions?: boolean;
+  controlsDisabled?: boolean;
 }
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
@@ -44,6 +55,15 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   suggestionKey,
   highlightedSuggestionIndex,
   linkedHighlightIndex,
+  showControls = false, // Default to false
+  onLink,
+  onUnlink,
+  onSuggest,
+  canLink = false,
+  canUnlink = false,
+  isSuggesting = false,
+  hasSuggestions = false,
+  controlsDisabled = false,
 }) => {
   const isManuallyAligned = (index: number): boolean => {
     return manualAlignments.some((link) => link[alignmentKey] === index);
@@ -75,8 +95,20 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 
   return (
     <Card className="flex flex-col h-full shadow-md">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>{title}</CardTitle>
+         {showControls && onLink && onUnlink && onSuggest && (
+           <InlineAlignmentControls
+             onLink={onLink}
+             onUnlink={onUnlink}
+             onSuggest={onSuggest}
+             canLink={canLink}
+             canUnlink={canUnlink}
+             isSuggesting={isSuggesting}
+             hasSuggestions={hasSuggestions}
+             disabled={controlsDisabled}
+           />
+         )}
       </CardHeader>
       <CardContent className="flex flex-col flex-grow p-0">
         {showTextarea && (
@@ -98,10 +130,6 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
               <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
                  <p className="text-muted-foreground">Loading {title} paragraphs...</p>
-                {/* Optional: Show skeletons while loading */}
-                {/* <Skeleton className="h-10 w-full rounded-md" />
-                <Skeleton className="h-10 w-full rounded-md" />
-                <Skeleton className="h-10 w-full rounded-md" /> */}
               </div>
             ) : !showTextarea ? (
                <div className="flex flex-col items-center justify-center h-full p-10 text-center">
@@ -184,3 +212,4 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 };
 
 export default TextAreaPanel;
+```

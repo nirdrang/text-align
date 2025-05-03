@@ -2,12 +2,10 @@
 
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import TextAreaPanel from '@/components/text-area-panel';
-import AlignmentControls from '@/components/alignment-controls';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { Loader2, DownloadCloud } from 'lucide-react';
 import { suggestParagraphAlignment } from '@/ai/flows/suggest-paragraph-alignment';
 import { fetchTextFromUrl } from '@/actions/fetch-text'; // Import the server action
@@ -36,6 +34,7 @@ export default function Home() {
   const hebrewParagraphs = useMemo(() => hebrewText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [], [hebrewText]);
 
   const textsAreLoaded = englishText !== null && hebrewText !== null;
+  const controlsDisabled = !textsAreLoaded || isFetching;
 
   // --- Text Fetching Logic ---
   const handleFetchTexts = useCallback(async () => {
@@ -308,7 +307,7 @@ export default function Home() {
       {/* Alignment Section */}
       <div className="flex flex-grow gap-4 min-h-0">
         {/* English Panel */}
-        <div className="w-5/12 english-panel">
+        <div className="w-1/2 english-panel"> {/* Changed width to 1/2 */}
           <TextAreaPanel
             title="English"
             text={englishText ?? ''} // Provide empty string if null
@@ -328,24 +327,8 @@ export default function Home() {
           />
         </div>
 
-        {/* Controls Panel */}
-        <div className="w-2/12 flex items-center justify-center">
-          <Card className="h-fit shadow-md">
-              <AlignmentControls
-                onLink={handleLink}
-                onUnlink={handleUnlink}
-                onSuggest={handleSuggest}
-                canLink={canLink}
-                canUnlink={canUnlink}
-                isSuggesting={isSuggesting}
-                hasSuggestions={suggestedAlignments !== null}
-                disabled={!textsAreLoaded || isFetching} // Disable controls if not loaded or fetching
-              />
-          </Card>
-        </div>
-
         {/* Hebrew Panel */}
-         <div className="w-5/12 hebrew-panel">
+         <div className="w-1/2 hebrew-panel"> {/* Changed width to 1/2 */}
           <TextAreaPanel
             title="Hebrew"
             text={hebrewText ?? ''} // Provide empty string if null
@@ -362,9 +345,19 @@ export default function Home() {
             suggestionKey="hebrewParagraphIndex"
             highlightedSuggestionIndex={highlightedSuggestionTargetIndex}
             linkedHighlightIndex={highlightedSuggestionIndex}
+            showControls={true} // Pass flag to show controls
+            onLink={handleLink}
+            onUnlink={handleUnlink}
+            onSuggest={handleSuggest}
+            canLink={canLink}
+            canUnlink={canUnlink}
+            isSuggesting={isSuggesting}
+            hasSuggestions={suggestedAlignments !== null}
+            controlsDisabled={controlsDisabled}
           />
         </div>
       </div>
     </div>
   );
 }
+```
