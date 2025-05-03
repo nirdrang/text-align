@@ -24,7 +24,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-// Removed scoreAlignment import
 
 
 // Throttling function
@@ -114,6 +113,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
  interface DisplayedParagraphData {
     paragraph: string;
     originalIndex: number;
+    score?: number | null; // Optional score
+    scoreLoading?: boolean;
  }
 
  function parseParagraphs(text: string | null, language: 'english' | 'hebrew'): string[] {
@@ -127,11 +128,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
               if (language === 'hebrew') {
                  normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true);
-                 if (originalParagraph !== normalizedParagraph) {
-                    console.log(`[Normalization] Hebrew Paragraph ${index + 1} Normalized:`);
-                    console.log("  Before:", originalParagraph.substring(0, 100) + (originalParagraph.length > 100 ? "..." : ""));
-                    console.log("  After: ", normalizedParagraph.substring(0, 100) + (normalizedParagraph.length > 100 ? "..." : ""));
-                 }
+                 // Removed console logs related to normalization
               } else {
                  // English text is not normalized
                  normalizedParagraph = originalParagraph;
@@ -187,7 +184,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      });
      const [isScrollSyncEnabled, setIsScrollSyncEnabled] = useLocalStorage('isScrollSyncEnabled', true);
      const [isDownloading, setIsDownloading] = useState(false);
-     // Removed isScoring state
+     // Add state for scoring
+     const [isScoring, setIsScoring] = useState(false);
 
      const englishPanelRef = useRef<HTMLDivElement>(null);
      const hebrewPanelRef = useRef<HTMLDivElement>(null);
@@ -251,7 +249,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  title: "Missing URLs",
                  description: "Please enter both English and Hebrew URLs.",
                  variant: "destructive",
-                 duration: 2000, // Consistent duration
+                 duration: 2000,
              });
             return;
         }
@@ -266,6 +264,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setCanConfirmPair(false);
          setCanUnlink(false);
          setControlsDisabled(true);
+         setIsScoring(false);
 
 
          try {
@@ -301,16 +300,21 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              const mapToDisplayedData = (item: { paragraph: string; originalIndex: number }): DisplayedParagraphData => ({
                  paragraph: item.paragraph,
                  originalIndex: item.originalIndex,
+                 score: null, // Initialize score to null
+                 scoreLoading: false, // Initialize loading state
              });
+
+             const initialEnglishDisplayed = filterMetadata(englishParagraphsWithIndices, newHiddenIndices.english).map(mapToDisplayedData);
+             const initialHebrewDisplayed = filterMetadata(hebrewParagraphsWithIndices, newHiddenIndices.hebrew).map(mapToDisplayedData);
 
              setProcessedParagraphs({
                  english: {
                      original: englishParagraphsWithIndices,
-                     displayed: filterMetadata(englishParagraphsWithIndices, newHiddenIndices.english).map(mapToDisplayedData),
+                     displayed: initialEnglishDisplayed,
                  },
                  hebrew: {
                      original: hebrewParagraphsWithIndices,
-                     displayed: filterMetadata(hebrewParagraphsWithIndices, newHiddenIndices.hebrew).map(mapToDisplayedData),
+                     displayed: initialHebrewDisplayed,
                  },
              });
 
@@ -319,6 +323,13 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              setCanConfirmPair(false);
              setCanUnlink(false);
              setControlsDisabled(true);
+             setIsScoring(false);
+
+             // Trigger initial scoring after fetch completes and paragraphs are processed
+             if (initialEnglishDisplayed.length > 0 && initialHebrewDisplayed.length > 0) {
+                handleCalculateAllScores();
+             }
+
          } catch (error: any) {
              console.error("Failed to fetch texts:", error);
              toast({
@@ -412,11 +423,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  setProcessedParagraphs(prev => ({
                      english: {
                          original: prev.english.original,
-                         displayed: filterMetadata(prev.english.original, newHidden.english).map(item => ({...item})), // No scoring props
+                         displayed: filterMetadata(prev.english.original, newHidden.english).map(item => ({...item, score: null, scoreLoading: false })),
                      },
                      hebrew: {
                          original: prev.hebrew.original,
-                         displayed: filterMetadata(prev.hebrew.original, newHidden.hebrew).map(item => ({...item})), // No scoring props
+                         displayed: filterMetadata(prev.hebrew.original, newHidden.hebrew).map(item => ({...item, score: null, scoreLoading: false })),
                      },
                  }));
 
@@ -468,8 +479,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
 
           setProcessedParagraphs(prev => {
-             const newEnglishDisplayed = filterMetadata(prev.english.original, newHiddenIndicesState.english).map(item => ({...item})); // No scoring props
-             const newHebrewDisplayed = filterMetadata(prev.hebrew.original, newHiddenIndicesState.hebrew).map(item => ({...item})); // No scoring props
+             const newEnglishDisplayed = filterMetadata(prev.english.original, newHiddenIndicesState.english).map(item => ({...item, score: null, scoreLoading: false }));
+             const newHebrewDisplayed = filterMetadata(prev.hebrew.original, newHiddenIndicesState.hebrew).map(item => ({...item, score: null, scoreLoading: false }));
              return {
                  english: {
                      original: prev.english.original,
@@ -521,7 +532,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             ).filter(p => p.originalIndex !== sourceOriginalIndex);
 
              const newDisplayedHebrew = displayedHebrew
-                .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText } : p) // No scoring props
+                .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText, score: null, scoreLoading: false } : p)
                 .filter((_, idx) => idx !== displayedIndex);
 
              const newHebrewHidden = new Set(hiddenIndices.hebrew);
@@ -534,7 +545,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             setControlsDisabled(true);
             setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
 
-            toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged.`, duration: 2000 });
+            toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged. Re-score needed.`, duration: 2000 });
 
             return {
                  ...prev,
@@ -565,7 +576,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              ).filter(p => p.originalIndex !== targetOriginalIndex);
 
              const newDisplayedHebrew = displayedHebrew
-                .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText } : p) // No scoring props
+                .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText, score: null, scoreLoading: false } : p)
                 .filter((_, idx) => idx !== displayedIndex + 1);
 
              const newHebrewHidden = new Set(hiddenIndices.hebrew);
@@ -578,7 +589,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             setControlsDisabled(true);
              setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
 
-             toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged.`, duration: 2000 });
+             toast({ title: "Paragraphs Merged", description: `Hebrew paragraphs merged. Re-score needed.`, duration: 2000 });
 
             return {
                  ...prev,
@@ -629,23 +640,124 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
                  if (wordCount <= 20) initialHidden.hebrew.add(item.originalIndex);
              });
-              setHiddenIndices(initialHidden); // Keep existing hidden unless starting fresh
+              setHiddenIndices(initialHidden);
              setProcessedParagraphs(prev => ({
                  english: {
                      original: prev.english.original,
-                      displayed: filterMetadata(prev.english.original, initialHidden.english).map(item => ({...item})), // No scoring props
+                      displayed: filterMetadata(prev.english.original, initialHidden.english).map(item => ({...item, score: null, scoreLoading: false })),
                  },
                  hebrew: {
                      original: prev.hebrew.original,
-                      displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew).map(item => ({...item})), // No scoring props
+                      displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew).map(item => ({...item, score: null, scoreLoading: false })),
                  },
              }));
+             // Re-trigger scoring after starting fresh if texts are loaded
+             handleCalculateAllScores();
          }
-         // If texts aren't loaded yet, startFresh just clears JSONL records. Hidden indices will be set on fetch.
-
 
          toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs.", duration: 2000 });
      };
+
+
+     // --- SCORING FUNCTIONALITY ---
+
+     const handleCalculateSingleScore = useCallback(async (displayedIndex: number) => {
+        const hebrewParaData = processedParagraphs.hebrew.displayed[displayedIndex];
+        const englishParaData = processedParagraphs.english.displayed[displayedIndex]; // Assuming 1-to-1 index correspondence after filtering
+
+        if (!hebrewParaData || !englishParaData) {
+             console.warn(`[Score] Cannot score index ${displayedIndex}: Paragraph data missing.`);
+             return;
+        }
+
+        setProcessedParagraphs(prev => ({
+            ...prev,
+            hebrew: {
+                ...prev.hebrew,
+                 displayed: prev.hebrew.displayed.map((p, idx) =>
+                    idx === displayedIndex ? { ...p, scoreLoading: true, score: null } : p
+                ),
+             },
+        }));
+
+        try {
+             console.log(`[Score] Requesting score for index ${displayedIndex}: EN="${englishParaData.paragraph.substring(0, 50)}...", HE="${hebrewParaData.paragraph.substring(0, 50)}..."`);
+             const response = await fetch('/api/score', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ en: englishParaData.paragraph, he: hebrewParaData.paragraph }),
+             });
+
+             if (!response.ok) {
+                 const errorData = await response.json();
+                 throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+             }
+
+             const scoreResult = await response.json();
+             console.log(`[Score] Received score for index ${displayedIndex}:`, scoreResult);
+
+             setProcessedParagraphs(prev => ({
+                ...prev,
+                hebrew: {
+                    ...prev.hebrew,
+                     displayed: prev.hebrew.displayed.map((p, idx) =>
+                         idx === displayedIndex ? { ...p, score: scoreResult.blended, scoreLoading: false } : p
+                    ),
+                 },
+             }));
+        } catch (error: any) {
+             console.error(`[Score] Error scoring index ${displayedIndex}:`, error);
+             toast({
+                 title: `Score Error (Para ${displayedIndex + 1})`,
+                 description: error.message || "Failed to calculate score.",
+                 variant: "destructive",
+                 duration: 2000,
+             });
+             setProcessedParagraphs(prev => ({
+                 ...prev,
+                hebrew: {
+                    ...prev.hebrew,
+                     displayed: prev.hebrew.displayed.map((p, idx) =>
+                         idx === displayedIndex ? { ...p, scoreLoading: false, score: null } : p // Reset loading, keep score null
+                    ),
+                 },
+             }));
+        }
+     }, [processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed, toast]);
+
+     const handleCalculateAllScores = useCallback(async () => {
+        if (!textsAreLoaded || isScoring) {
+             console.log("[Score] Skipping score calculation: Texts not loaded or already scoring.");
+            return;
+         }
+         setIsScoring(true);
+         toast({ title: "Calculating Scores...", description: "Please wait.", duration: 5000 }); // Longer duration while scoring
+
+         // Set loading state for all Hebrew paragraphs
+         setProcessedParagraphs(prev => ({
+             ...prev,
+             hebrew: {
+                ...prev.hebrew,
+                 displayed: prev.hebrew.displayed.map(p => ({ ...p, scoreLoading: true, score: null })),
+             },
+         }));
+
+        const scorePromises = processedParagraphs.hebrew.displayed.map((_, index) =>
+             handleCalculateSingleScore(index)
+        );
+
+        try {
+            await Promise.all(scorePromises);
+            toast({ title: "Scoring Complete", description: "Scores have been updated.", duration: 2000 });
+         } catch (error) {
+            // Errors are handled within handleCalculateSingleScore, but we catch here just in case
+            console.error("[Score] Error during bulk score calculation:", error);
+             toast({ title: "Scoring Failed", description: "Some scores could not be calculated.", variant: "destructive", duration: 2000 });
+         } finally {
+             setIsScoring(false);
+         }
+
+     }, [textsAreLoaded, isScoring, processedParagraphs.hebrew.displayed, handleCalculateSingleScore, toast]);
 
 
      // --- END SCORING FUNCTIONALITY ---
@@ -763,7 +875,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="English URL"
                              value={englishUrl}
                              onChange={handleEnglishUrlChange}
-                             disabled={isFetching || isDownloading} // Removed scoring check
+                             disabled={isFetching || isDownloading || isScoring}
                              className="h-8 text-sm"
                          />
                      </div>
@@ -775,14 +887,14 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                              placeholder="Hebrew URL"
                              value={hebrewUrl}
                              onChange={handleHebrewUrlChange}
-                             disabled={isFetching || isDownloading} // Removed scoring check
+                             disabled={isFetching || isDownloading || isScoring}
                              dir="rtl"
                              className="h-8 text-sm"
                          />
                      </div>
                      <Button
                          onClick={handleFetchTexts}
-                         disabled={isFetching || isDownloading || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Removed scoring check
+                         disabled={isFetching || isDownloading || isScoring || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()}
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
                      >
@@ -791,7 +903,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                      </Button>
                       <Button
                          onClick={handleDownloadJsonl}
-                         disabled={isDownloading || jsonlRecords.length === 0 || isFetching} // Removed scoring check
+                         disabled={isDownloading || jsonlRecords.length === 0 || isFetching || isScoring}
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
                          variant="outline"
@@ -803,7 +915,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          <AlertDialogTrigger asChild>
                              <Button
                                  variant="destructive"
-                                 disabled={isFetching || isDownloading || !textsAreLoaded} // Removed scoring check
+                                 disabled={isFetching || isDownloading || isScoring || !textsAreLoaded}
                                  className="w-full sm:w-auto h-8 text-xs"
                                  size="sm"
                              >
@@ -861,7 +973,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          onUnlink={handleUnlink}
                          canConfirmPair={canConfirmPair}
                          canUnlink={canUnlink}
-                         controlsDisabled={controlsDisabled || !textsAreLoaded} // Removed scoring check
+                         controlsDisabled={controlsDisabled || !textsAreLoaded || isScoring}
                          isSourceLanguage={false}
                          loadedText={hebrewText}
                          language="hebrew"
@@ -872,7 +984,9 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)}
                          onMergeUp={handleMergeUp}
                          onMergeDown={handleMergeDown}
-                         // Removed scoring related props
+                         onCalculateSingleScore={handleCalculateSingleScore}
+                         isScoring={isScoring}
+                         onCalculateAllScores={handleCalculateAllScores}
                      />
                  </div>
              </div>
