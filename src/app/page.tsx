@@ -72,15 +72,20 @@ export default function Home() {
   };
 
 
-  // Split text into paragraphs based on double line breaks
+  // Split text into paragraphs based on double line breaks. Internal single newlines are preserved.
   const englishParagraphs = useMemo(() => {
+      // Split by one or more sequences of (whitespace + newline + whitespace)
+      // This treats \n\n, \n \n, \n\t\n etc. as paragraph breaks.
       const paragraphs = englishText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [];
       console.log(`[Page] Generated ${paragraphs.length} English paragraphs.`);
+      // console.log('[Page] English Paragraphs:', paragraphs); // For debugging
       return paragraphs;
   }, [englishText]);
   const hebrewParagraphs = useMemo(() => {
+       // Same logic for Hebrew text
        const paragraphs = hebrewText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [];
        console.log(`[Page] Generated ${paragraphs.length} Hebrew paragraphs.`);
+       // console.log('[Page] Hebrew Paragraphs:', paragraphs); // For debugging
        return paragraphs;
   }, [hebrewText]);
 
@@ -245,9 +250,10 @@ export default function Home() {
 
     try {
        console.log('[Page] Calling suggestParagraphAlignment flow...');
+       // Pass the *original* texts to the AI, not the potentially re-split paragraphs
       const suggestions = await suggestParagraphAlignment({ englishText, hebrewText });
        console.log('[Page] Received suggestions from AI:', suggestions);
-      // Filter suggestions to only include valid paragraph indices
+      // Filter suggestions to only include valid paragraph indices based on the *current* split
        const validSuggestions = suggestions.filter(s =>
             s.englishParagraphIndex >= 0 && s.englishParagraphIndex < englishParagraphs.length &&
             s.hebrewParagraphIndex >= 0 && s.hebrewParagraphIndex < hebrewParagraphs.length
@@ -266,7 +272,7 @@ export default function Home() {
        console.log('[Page] Suggestion process finished.');
       setIsSuggesting(false);
     }
-  }, [englishText, hebrewText, toast, englishParagraphs.length, hebrewParagraphs.length]);
+  }, [englishText, hebrewText, toast, englishParagraphs.length, hebrewParagraphs.length]); // Include paragraph lengths
 
   // --- Paragraph Selection and Highlighting ---
 

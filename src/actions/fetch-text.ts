@@ -8,7 +8,8 @@ interface FetchResult {
 }
 
 /**
- * Fetches HTML from a URL and extracts text content, trying to maintain paragraph structure.
+ * Fetches HTML from a URL and extracts text content, attempting to preserve
+ * paragraph structure including internal line breaks (e.g., from <br> tags).
  * @param url The URL to fetch text from.
  * @returns An object containing the extracted text or an error message.
  */
@@ -70,7 +71,8 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
             console.warn(`[fetchTextFromUrl] Plain text content is empty for ${url}.`);
             return { error: 'Could not extract significant text content (plain text was empty).' };
           }
-          return { text };
+          // Preserve line breaks in plain text
+          return { text: text.replace(/\r\n/g, '\n') };
      }
 
 
@@ -92,56 +94,91 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
     mainContent.find('script, style, nav, footer, header, aside, form, noscript, [aria-hidden="true"], .advertisement, .ad, .sidebar').remove();
     console.log(`[fetchTextFromUrl] Removed script, style, nav, etc. elements for ${url}.`);
 
-    // Extract text from paragraph (<p>) tags and relevant <div>s within the main content
+    // Extract text from paragraph (<p>) tags and relevant <div>s within the main content, preserving <br>
     const paragraphs: string[] = [];
-    mainContent.find('p, div').each((i, el) => {
-      const element = $(el);
+    // Select common block-level text containers
+    mainContent.find('p, div, blockquote, li, h1, h2, h3, h4, h5, h6').each((i, el) => {
+        const element = $(el);
 
-      // Basic heuristic for paragraph-like divs: contains significant text, few block children
-      const isParagraphLikeDiv = el.name === 'div' &&
-          element.children('p, div, ul, ol, h1, h2, h3, h4, h5, h6, table, blockquote').length < 2 && // Few block children
-          element.text().trim().length > 50; // Adjust length threshold as needed
-
-      if (el.name === 'p' || isParagraphLikeDiv) {
-        // Get text, clean up whitespace, try to preserve intended line breaks within the paragraph block
-        let paragraphText = '';
-         element.contents().each((_, node) => {
-           if (node.type === 'text') {
-             paragraphText += $(node).text();
-           } else if (node.type === 'tag' && (node.name === 'br' || node.name === 'p')) { // Treat nested <p> like <br> for line breaks
-             paragraphText += '\n';
-           } else if (node.type === 'tag') {
-               // Add space around most inline elements to prevent words sticking together
-               const tagName = node.name.toLowerCase();
-               const innerText = $(node).text().trim();
-                if (innerText.length > 0 && !['sup', 'sub'].includes(tagName)) { // Avoid extra spaces for sup/sub
-                    paragraphText += ' ' + innerText + ' ';
-                } else if (innerText.length > 0) {
-                    paragraphText += innerText;
-                }
-           }
-         });
-
-        // Normalize whitespace: replace multiple spaces/newlines with single space, then trim.
-        paragraphText = paragraphText
-                .replace(/(\s*\n\s*)+/g, '\n') // Normalize line breaks
-                .replace(/[ \t\r\f\v]+/g, ' ') // Replace other whitespace chars with single space
-                .replace(/ \n/g, '\n') // Clean up space before newline
-                .replace(/\n /g, '\n') // Clean up space after newline
-                .trim();
-
-        // Add paragraph only if it contains meaningful content
-        if (paragraphText.length > 10) { // Stricter threshold to avoid tiny fragments
-          paragraphs.push(paragraphText);
+        // Basic heuristic for meaningful blocks: contains significant text, not just whitespace
+        const blockText = element.text().trim();
+        if (blockText.length < 10 && element.find('br').length === 0) { // Ignore very short blocks unless they contain line breaks
+            return; // Continue to next element
         }
-      }
+
+        // Check if this element is nested inside another element already processed as a paragraph.
+        // This helps avoid adding both a parent div and its child p tags separately.
+        let alreadyProcessed = false;
+        element.parents().each((_, parentEl) => {
+            if ($(parentEl).data('processed-paragraph')) {
+                alreadyProcessed = true;
+                return false; // Break the .each loop
+            }
+        });
+        if (alreadyProcessed) {
+            return; // Skip this element as its content is part of a processed parent
+        }
+        element.data('processed-paragraph', true); // Mark this element as processed
+
+
+        let paragraphText = '';
+        element.contents().each((_, node) => {
+            if (node.type === 'text') {
+                // Append text content, replacing multiple whitespace chars with a single space, but keeping \n if any exist implicitly
+                 paragraphText += $(node).text().replace(/[ \t\r\f\v]+/g, ' ');
+            } else if (node.type === 'tag') {
+                const tagName = node.name.toLowerCase();
+                if (tagName === 'br') {
+                    paragraphText += '\n'; // Preserve line break
+                } else if ($(node).is('p, div, blockquote, li, h1, h2, h3, h4, h5, h6')) {
+                    // For nested block elements, recursively get text and add double newline (unless it's the first node)
+                    if (paragraphText.length > 0 && !paragraphText.endsWith('\n\n')) {
+                       paragraphText += '\n\n';
+                    }
+                    // We avoid double-counting by marking elements, so we just get the text here.
+                    paragraphText += $(node).text().replace(/[ \t\r\f\v]+/g, ' ');
+
+                } else {
+                   // For inline elements, add their text with surrounding spaces (if needed) to prevent words sticking together.
+                   const innerText = $(node).text().trim();
+                   if (innerText.length > 0) {
+                       // Add space only if the paragraph text doesn't already end with whitespace or newline
+                       if (!/\s$/.test(paragraphText)) {
+                           paragraphText += ' ';
+                       }
+                       paragraphText += innerText;
+                       // Add space only if the inner text doesn't end with whitespace
+                        if (!/\s$/.test(innerText)) {
+                           paragraphText += ' ';
+                        }
+                   }
+                }
+            }
+        });
+
+        // Final cleanup for the block: trim leading/trailing whitespace and normalize multiple newlines/spaces
+        paragraphText = paragraphText
+            .replace(/ +\n/g, '\n') // Remove space before newline
+            .replace(/\n +/g, '\n') // Remove space after newline
+            .replace(/\n{3,}/g, '\n\n') // Collapse 3+ newlines to 2 (paragraph break)
+            .replace(/ {2,}/g, ' ') // Collapse multiple spaces to one
+            .trim();
+
+
+        // Add paragraph only if it contains meaningful content after cleaning
+        if (paragraphText.length > 0) {
+             // Avoid adding duplicates if the exact same text block was already added
+             if (!paragraphs.includes(paragraphText)) {
+                paragraphs.push(paragraphText);
+             }
+        }
     });
 
-    console.log(`[fetchTextFromUrl] Found ${paragraphs.length} potential paragraphs in main content for ${url}.`);
+    console.log(`[fetchTextFromUrl] Found ${paragraphs.length} potential paragraphs/blocks for ${url}.`);
 
-    // If paragraph extraction yielded little, try a simpler approach: text of main content, split by lines.
-    if (paragraphs.length < 3) { // Adjust this threshold if needed
-        console.warn(`[fetchTextFromUrl] Low paragraph count (${paragraphs.length}) for ${url}. Trying fallback text extraction.`);
+    // Fallback (less likely needed with the broader selector)
+    if (paragraphs.length < 1) {
+        console.warn(`[fetchTextFromUrl] Low block count (${paragraphs.length}) for ${url}. Trying simple text extraction.`);
         const fallbackText = mainContent.text();
         const fallbackParagraphs = fallbackText
             .split(/[\r\n]+/) // Split by any newline sequence
@@ -149,15 +186,15 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
             .filter(line => line.length > 10); // Filter short/empty lines
 
         if (fallbackParagraphs.length > paragraphs.length) {
-             console.log(`[fetchTextFromUrl] Fallback extraction yielded ${fallbackParagraphs.length} paragraphs for ${url}. Using fallback.`);
+             console.log(`[fetchTextFromUrl] Fallback extraction yielded ${fallbackParagraphs.length} lines for ${url}. Using fallback.`);
              paragraphs.splice(0, paragraphs.length, ...fallbackParagraphs); // Replace original paragraphs
         } else {
-             console.log(`[fetchTextFromUrl] Fallback extraction did not yield more paragraphs for ${url}. Keeping original ${paragraphs.length}.`);
+             console.log(`[fetchTextFromUrl] Fallback extraction did not yield more content for ${url}. Keeping original ${paragraphs.length}.`);
         }
     }
 
 
-    // Join paragraphs with double line breaks
+    // Join the extracted blocks with double line breaks to signify paragraph separation
     const extractedText = paragraphs.join('\n\n');
     console.log(`[fetchTextFromUrl] Final extracted text length for ${url}: ${extractedText.length}`);
     // console.log(`[fetchTextFromUrl] Extracted Text (first 500 chars) for ${url}:\n`, extractedText.substring(0, 500));

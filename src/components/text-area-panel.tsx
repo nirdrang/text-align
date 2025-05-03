@@ -189,20 +189,20 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                         ? 'border-accent border-dashed' // Dashed for manual
                         : isSuggested ? 'border-primary/30 border-dotted' // Dotted for suggested
                         : 'border-border', // Default border
+                      // Ensure directionality is set correctly
+                      title === 'Hebrew' ? 'rtl text-right' : 'ltr text-left'
                     )}
                      style={highlightStyle}
                     data-paragraph-index={index}
                     {...(manuallyAligned && { 'data-linked-to': linkedPartnerIndex })}
                     {...(isSuggested && {'data-suggested-link': suggestionPartnerIndex, 'data-confidence': suggestionConfidence })}
                   >
-                    <p className={title === 'Hebrew' ? 'rtl text-right' : 'ltr text-left'}>
-                      {/* Using dangerouslySetInnerHTML to render potential <br> tags */}
-                      {paragraph ? (
-                           <span dangerouslySetInnerHTML={{ __html: paragraph.replace(/\n/g, '<br />') }} />
-                       ) : (
-                           <span className="text-muted-foreground italic">Empty paragraph</span>
-                       )}
-                    </p>
+                    {/* Using dangerouslySetInnerHTML to render potential <br> tags from single newlines */}
+                    {paragraph ? (
+                         <span dangerouslySetInnerHTML={{ __html: paragraph.replace(/\n/g, '<br />') }} />
+                     ) : (
+                         <span className="text-muted-foreground italic">Empty paragraph</span>
+                     )}
                   </div>
                 );
               })
