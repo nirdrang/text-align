@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -5,7 +6,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Label } from '@/components/ui/label';
  import { Input } from '@/components/ui/input';
  import { Button } from '@/components/ui/button'; // Import Button
- import { Loader2, DownloadCloud, Check, Eraser } from 'lucide-react'; // Added Check, Eraser
+ import { Loader2, DownloadCloud, Check, Eraser, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react'; // Added Check, Eraser, Link Icons
  import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path
  import { fetchTexts } from '@/lib/api';
  import { SuggestedAlignment } from '@/types/alignment';
@@ -279,7 +280,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setHebrewText(null); // Reset text state
          setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } }); // Reset paragraphs
          // Clear JSONL records when fetching new text
-         setJsonlRecords([]);
+         // We intentionally DO NOT clear jsonlRecords here. User can use "Start Fresh"
+         // setJsonlRecords([]);
          setSuggestedAlignments(null);
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
@@ -351,6 +353,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  title: "Fetch Error",
                  description: error.message || "Failed to fetch or process text from URLs.",
                  variant: "destructive",
+                 duration: 2000,
              });
          } finally {
              setIsFetching(false);
@@ -448,7 +451,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  // Add the record to the state
                  setJsonlRecords(prevRecords => [...prevRecords, jsonlString]);
                  console.log(`Pair confirmed and added to JSONL records: ${jsonlString}`);
-                 toast({ title: "Pair Confirmed", description: `English paragraph ${selectedEnglishIndex + 1} and Hebrew paragraph ${selectedHebrewIndex + 1} added to export list.` });
+                 toast({
+                    title: "Pair Confirmed",
+                    description: `English paragraph ${selectedEnglishIndex + 1} and Hebrew paragraph ${selectedHebrewIndex + 1} added to export list.`,
+                    duration: 2000,
+                 });
 
 
                  // --- Remove the confirmed paragraphs from display ---
@@ -482,7 +489,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
              } else {
                  console.error("Could not find paragraph data for selected indices.");
-                 toast({ title: "Confirmation Error", description: "Could not retrieve paragraph text for confirmation.", variant: "destructive" });
+                 toast({
+                    title: "Confirmation Error",
+                    description: "Could not retrieve paragraph text for confirmation.",
+                    variant: "destructive",
+                    duration: 2000,
+                 });
              }
          } else {
             console.warn(`Confirmation conditions not met: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}, canConfirm=${canConfirmPair}`);
@@ -493,7 +505,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
       // handleUnlink might be removed or repurposed depending on workflow
       const handleUnlink = () => {
          console.warn("Unlink functionality is currently disabled or under review for JSONL workflow.");
-         toast({ title: "Action Disabled", description: "Unlinking confirmed pairs is not directly supported in this workflow.", variant: "destructive" });
+         toast({
+            title: "Action Disabled",
+            description: "Unlinking confirmed pairs is not directly supported in this workflow.",
+            variant: "destructive",
+            duration: 2000,
+         });
          // If needed, implement logic to remove a specific record from jsonlRecords based on selection,
          // and potentially unhide the corresponding paragraphs. This would be complex.
          // For now, clear selections.
@@ -508,7 +525,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      const handleSuggest = async () => {
          if (!englishText || !hebrewText) {
              console.warn("Cannot suggest alignment: Texts not loaded.");
-              toast({ title: "Suggestion Error", description: "Please load both texts before suggesting alignments.", variant: "destructive" });
+              toast({
+                title: "Suggestion Error",
+                description: "Please load both texts before suggesting alignments.",
+                variant: "destructive",
+                duration: 2000,
+            });
              return;
          }
 
@@ -516,7 +538,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setControlsDisabled(true); // Disable controls during suggestion
          setSuggestedAlignments(null); // Clear previous suggestions
          console.log("Starting AI suggestion...");
-          toast({ title: "AI Suggestion Started", description: "Asking the AI to suggest paragraph alignments..." });
+          toast({
+            title: "AI Suggestion Started",
+            description: "Asking the AI to suggest paragraph alignments...",
+            duration: 2000,
+        });
 
 
          try {
@@ -568,7 +594,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              console.log(`Valid AI Suggestions (mapped to original indices): ${validSuggestions.length} suggestions`);
 
              setSuggestedAlignments(validSuggestions);
-              toast({ title: "AI Suggestions Ready", description: `Received ${validSuggestions.length} alignment suggestions.` });
+              toast({
+                title: "AI Suggestions Ready",
+                description: `Received ${validSuggestions.length} alignment suggestions.`,
+                duration: 2000,
+            });
 
              // Clear specific highlights for single suggestion
              setHighlightedSuggestionIndex(null);
@@ -577,7 +607,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
          } catch (error: any) {
              console.error("Failed to get AI suggestions:", error);
-             toast({ title: "AI Suggestion Failed", description: error.message || "An error occurred while getting suggestions.", variant: "destructive" });
+             toast({
+                title: "AI Suggestion Failed",
+                description: error.message || "An error occurred while getting suggestions.",
+                variant: "destructive",
+                duration: 2000,
+            });
              setSuggestedAlignments([]); // Clear suggestions on error
          } finally {
              setIsSuggesting(false);
@@ -597,7 +632,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
      const handleDropParagraph = (originalIndex: number, language: 'english' | 'hebrew') => {
          console.log(`Hiding paragraph: Lang=${language}, OriginalIdx=${originalIndex}`);
-          toast({ title: "Paragraph Hidden", description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph ${originalIndex + 1} hidden.` });
+          toast({
+            title: "Paragraph Hidden",
+            description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph ${originalIndex + 1} hidden.`,
+            duration: 2000,
+        });
 
 
          // Update the hidden indices state immutably
@@ -667,7 +706,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      const handleMergeUp = (displayedIndex: number) => {
         console.log(`Attempting to merge Hebrew paragraph ${displayedIndex} UP`);
         if (displayedIndex <= 0) {
-             toast({ title: "Merge Error", description: "Cannot merge the first paragraph up.", variant: "destructive" });
+             toast({
+                title: "Merge Error",
+                description: "Cannot merge the first paragraph up.",
+                variant: "destructive",
+                duration: 2000,
+            });
              return; // Cannot merge up the first paragraph
         }
 
@@ -678,8 +722,8 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             const targetParagraphData = displayedHebrew[displayedIndex - 1];
             const sourceParagraphData = displayedHebrew[displayedIndex];
 
-            // Create the merged paragraph text using normalized text
-            const mergedText = `${targetParagraphData.paragraph}\n\n${sourceParagraphData.paragraph}`; // Add double newline between merged paragraphs
+            // Create the merged paragraph text using normalized text, WITHOUT double newline
+            const mergedText = `${targetParagraphData.paragraph} ${sourceParagraphData.paragraph}`;
 
              // Update the original paragraph list (find by originalIndex and update text)
              const targetOriginalIndex = targetParagraphData.originalIndex;
@@ -713,7 +757,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             setCanUnlink(false);
             setControlsDisabled(true);
 
-            toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex}.` });
+            toast({
+                title: "Paragraphs Merged",
+                description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex}.`,
+                duration: 2000,
+            });
             console.log(`Merged up: Target originalIdx=${targetOriginalIndex}, Source originalIdx=${sourceOriginalIndex}`);
 
             return {
@@ -731,15 +779,20 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
         setProcessedParagraphs(prev => {
              const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
              if (displayedIndex >= displayedHebrew.length - 1) {
-                  toast({ title: "Merge Error", description: "Cannot merge the last paragraph down.", variant: "destructive" });
+                  toast({
+                    title: "Merge Error",
+                    description: "Cannot merge the last paragraph down.",
+                    variant: "destructive",
+                    duration: 2000,
+                });
                   return prev; // Cannot merge down the last paragraph
              }
 
             const sourceParagraphData = displayedHebrew[displayedIndex];
             const targetParagraphData = displayedHebrew[displayedIndex + 1];
 
-            // Concatenate the already normalized paragraphs
-            const mergedText = `${sourceParagraphData.paragraph}\n\n${targetParagraphData.paragraph}`; // Add double newline
+            // Concatenate the already normalized paragraphs, WITHOUT double newline
+            const mergedText = `${sourceParagraphData.paragraph} ${targetParagraphData.paragraph}`;
 
             // Update the original paragraph list (find source by originalIndex, update text, remove target)
             const sourceOriginalIndex = sourceParagraphData.originalIndex;
@@ -769,7 +822,11 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
             setCanUnlink(false);
             setControlsDisabled(true);
 
-             toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex + 2}.` });
+             toast({
+                title: "Paragraphs Merged",
+                description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex + 2}.`,
+                duration: 2000,
+            });
              console.log(`Merged down: Source originalIdx=${sourceOriginalIndex}, Target originalIdx=${targetOriginalIndex}`);
 
 
@@ -788,7 +845,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      // --- DOWNLOAD JSONL FUNCTIONALITY ---
       const handleDownloadJsonl = () => {
          if (jsonlRecords.length === 0) {
-             toast({ title: "Download Error", description: "No confirmed pairs to download.", variant: "destructive" });
+             toast({
+                title: "Download Error",
+                description: "No confirmed pairs to download.",
+                variant: "destructive",
+                duration: 2000,
+            });
              return;
          }
 
@@ -799,11 +861,20 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
 
              const blob = new Blob([jsonlContent], { type: "application/jsonl;charset=utf-8" });
              saveAs(blob, "fine_tune.jsonl"); // Use the filename from the example
-             toast({ title: "Download Started", description: "Downloading fine_tune.jsonl file." });
+             toast({
+                title: "Download Started",
+                description: "Downloading fine_tune.jsonl file.",
+                duration: 2000,
+            });
 
          } catch (error: any) {
              console.error("Failed to generate JSONL download:", error);
-             toast({ title: "Download Failed", description: error.message || "An error occurred while generating the download file.", variant: "destructive" });
+             toast({
+                title: "Download Failed",
+                description: error.message || "An error occurred while generating the download file.",
+                variant: "destructive",
+                duration: 2000,
+            });
          } finally {
              setIsDownloading(false);
          }
@@ -828,36 +899,46 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          setControlsDisabled(true);
 
          // Reset hidden indices to only include automatically detected metadata
-         // Re-run the metadata detection logic based on current paragraphs
+         // Re-run the metadata detection logic based on current paragraphs if texts are loaded
          const initialHidden = { english: new Set<number>(), hebrew: new Set<number>() };
-         processedParagraphs.english.original.forEach(item => {
-             const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-             if (wordCount <= 20) {
-                 initialHidden.english.add(item.originalIndex);
-             }
-         });
-         processedParagraphs.hebrew.original.forEach(item => {
-             const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-             if (wordCount <= 20) {
-                 initialHidden.hebrew.add(item.originalIndex);
-             }
-         });
-         setHiddenIndices(initialHidden);
+         if (textsAreLoaded) {
+             processedParagraphs.english.original.forEach(item => {
+                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                 if (wordCount <= 20) {
+                     initialHidden.english.add(item.originalIndex);
+                 }
+             });
+             processedParagraphs.hebrew.original.forEach(item => {
+                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                 if (wordCount <= 20) {
+                     initialHidden.hebrew.add(item.originalIndex);
+                 }
+             });
+             setHiddenIndices(initialHidden);
 
-         // Update displayed paragraphs based on reset hidden indices
-         setProcessedParagraphs(prev => ({
-             english: {
-                 original: prev.english.original,
-                 displayed: filterMetadata(prev.english.original, initialHidden.english),
-             },
-             hebrew: {
-                 original: prev.hebrew.original,
-                 displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew),
-             },
-         }));
+             // Update displayed paragraphs based on reset hidden indices
+             setProcessedParagraphs(prev => ({
+                 english: {
+                     original: prev.english.original,
+                     displayed: filterMetadata(prev.english.original, initialHidden.english),
+                 },
+                 hebrew: {
+                     original: prev.hebrew.original,
+                     displayed: filterMetadata(prev.hebrew.original, initialHidden.hebrew),
+                 },
+             }));
+         } else {
+             // If texts are not loaded, just reset hiddenIndices state
+             setHiddenIndices(initialHidden);
+             setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } });
+         }
 
 
-         toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs. You can start pairing again." });
+         toast({
+            title: "Started Pairing Fresh",
+            description: "Cleared confirmed pairs. You can start pairing again.",
+            duration: 2000,
+        });
      };
      // --- END START FRESH FUNCTIONALITY ---
 
@@ -1131,3 +1212,4 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          </div>
      );
  }
+

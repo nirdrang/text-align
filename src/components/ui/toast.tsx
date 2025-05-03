@@ -44,11 +44,12 @@ const toastVariants = cva(
 const Toast = React.forwardRef<
   React.ElementRef<typeof ToastPrimitives.Root>,
   React.ComponentPropsWithoutRef<typeof ToastPrimitives.Root> &
-    VariantProps<typeof toastVariants>
->(({ className, variant, ...props }, ref) => {
+    VariantProps<typeof toastVariants> & { duration?: number } // Add duration prop type
+>(({ className, variant, duration, ...props }, ref) => { // Destructure duration
   return (
     <ToastPrimitives.Root
       ref={ref}
+      duration={duration} // Pass duration to the primitive
       className={cn(toastVariants({ variant }), className)}
       {...props}
     />
@@ -128,4 +129,3 @@ export {
   ToastClose,
   ToastAction,
 }
-

@@ -1,3 +1,4 @@
+
 "use client"
 
 // Inspired by react-hot-toast library
@@ -9,7 +10,7 @@ import type {
 } from "@/components/ui/toast"
 
 const TOAST_LIMIT = 1
-const TOAST_REMOVE_DELAY = 1000000
+const TOAST_REMOVE_DELAY = 2000 // Changed duration to 2000ms
 
 type ToasterToast = ToastProps & {
   id: string
@@ -77,8 +78,16 @@ const addToRemoveQueue = (toastId: string) => {
 export const reducer = (state: State, action: Action): State => {
   switch (action.type) {
     case "ADD_TOAST":
+      // Dismiss existing toasts before adding a new one if limit is reached
+      if (state.toasts.length >= TOAST_LIMIT) {
+          const oldestToastId = state.toasts[state.toasts.length - 1]?.id;
+          if (oldestToastId) {
+              dispatch({ type: "DISMISS_TOAST", toastId: oldestToastId });
+          }
+      }
       return {
         ...state,
+        // Add new toast at the beginning
         toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
       }
 
@@ -142,7 +151,7 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
-function toast({ ...props }: Toast) {
+function toast({ duration = TOAST_REMOVE_DELAY, ...props }: Toast & { duration?: number }) { // Add duration prop
   const id = genId()
 
   const update = (props: ToasterToast) =>
@@ -158,11 +167,18 @@ function toast({ ...props }: Toast) {
       ...props,
       id,
       open: true,
+      duration, // Pass duration to the toast component
       onOpenChange: (open) => {
         if (!open) dismiss()
       },
     },
   })
+
+  // Automatically dismiss after the duration
+  setTimeout(() => {
+      dismiss();
+  }, duration);
+
 
   return {
     id: id,
