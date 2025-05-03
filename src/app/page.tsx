@@ -7,14 +7,26 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Label } from '@/components/ui/label';
  import { Input } from '@/components/ui/input';
  import { Button } from '@/components/ui/button'; // Import Button
- import { Loader2, DownloadCloud, Check, Plus } from 'lucide-react'; // Added Check, Plus
+ import { Loader2, DownloadCloud, Check, Eraser } from 'lucide-react'; // Added Check, Eraser
  import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path
  import { fetchTexts } from '@/lib/api';
- import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
+ import { SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
  import { useLocalStorage } from '@/hooks/use-local-storage';
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { saveAs } from 'file-saver'; // Import file-saver
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"; // Import AlertDialog components
+
 
 // Throttling function
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
@@ -168,8 +180,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
      // State for storing confirmed JSONL records
      const [jsonlRecords, setJsonlRecords] = useLocalStorage<string[]>('jsonlRecords', []);
-     // Manual alignments are no longer used for linking state, kept for reference if needed later or remove fully
-     const [manualAlignments, setManualAlignments] = useLocalStorage<ManualAlignment[]>('manualAlignments', []);
      const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
      const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
      const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
@@ -801,6 +811,43 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      };
      // --- END DOWNLOAD JSONL FUNCTIONALITY ---
 
+     // --- START FRESH FUNCTIONALITY ---
+     const handleStartFresh = () => {
+         console.log("Clearing localStorage and resetting state...");
+         // Clear specific localStorage keys related to this app
+         localStorage.removeItem('englishUrl');
+         localStorage.removeItem('hebrewUrl');
+         localStorage.removeItem('jsonlRecords');
+         localStorage.removeItem('hiddenIndices');
+         localStorage.removeItem('isScrollSyncEnabled');
+         // Could also clear all localStorage, but safer to be specific
+         // localStorage.clear();
+
+         // Reset component state
+         setEnglishUrl('');
+         setHebrewUrl('');
+         setEnglishText(null);
+         setHebrewText(null);
+         setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } });
+         setSelectedEnglishIndex(null);
+         setSelectedHebrewIndex(null);
+         setJsonlRecords([]);
+         setSuggestedAlignments(null);
+         setHighlightedSuggestionIndex(null);
+         setHighlightedSuggestionTargetIndex(null);
+         setCanConfirmPair(false);
+         setCanUnlink(false);
+         setControlsDisabled(true);
+         setHiddenIndices({ english: new Set(), hebrew: new Set() });
+         setIsScrollSyncEnabled(true); // Reset to default if desired
+         setIsFetching(false);
+         setIsSuggesting(false);
+         setIsDownloading(false);
+
+         toast({ title: "Started Fresh", description: "Cleared stored data and reset the application." });
+     };
+     // --- END START FRESH FUNCTIONALITY ---
+
 
      // New useEffect for scroll synchronization
      useEffect(() => {
@@ -925,7 +972,7 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                  <CardHeader className="py-2 px-3 border-b"> {/* Optional: Add header for visual separation */}
                      {/* Optionally add a title like <CardTitle className="text-sm">Load Texts</CardTitle> */}
                  </CardHeader>
-                 <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-2 p-3 items-end"> {/* Changed to 4 cols */}
+                 <CardContent className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 items-end"> {/* Changed to 5 cols */}
                      <div className="space-y-1">
                          <Label htmlFor="english-url" className="text-xs">English URL</Label>
                          <Input
@@ -979,6 +1026,32 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          )}
                          {isDownloading ? 'Preparing...' : `Download Pairs (${jsonlRecords.length})`}
                      </Button>
+                     {/* Start Fresh Button */}
+                     <AlertDialog>
+                         <AlertDialogTrigger asChild>
+                             <Button
+                                 variant="destructive"
+                                 disabled={isFetching || isSuggesting || isDownloading}
+                                 className="w-full sm:w-auto h-8 text-xs"
+                                 size="sm"
+                             >
+                                 <Eraser className="mr-1 h-3 w-3" />
+                                 Start Fresh
+                             </Button>
+                         </AlertDialogTrigger>
+                         <AlertDialogContent>
+                             <AlertDialogHeader>
+                                 <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                                 <AlertDialogDescription>
+                                     This action cannot be undone. This will permanently delete all persisted data (URLs, confirmed pairs, hidden paragraphs) from your browser's local storage and reset the application.
+                                 </AlertDialogDescription>
+                             </AlertDialogHeader>
+                             <AlertDialogFooter>
+                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                 <AlertDialogAction onClick={handleStartFresh}>Continue</AlertDialogAction>
+                             </AlertDialogFooter>
+                         </AlertDialogContent>
+                     </AlertDialog>
                  </CardContent>
              </Card>
 
@@ -992,8 +1065,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          isLoading={isFetching && englishText === null}
                          selectedOriginalIndex={selectedEnglishIndex}
                          onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         manualAlignments={manualAlignments} // Still passing, might be removed later
-                         alignmentKey="englishIndex"
                          suggestedAlignments={suggestedAlignments}
                          suggestionKey="englishParagraphIndex"
                          highlightedSuggestionIndex={highlightedSuggestionIndex}
@@ -1017,8 +1088,6 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
                          isLoading={isFetching && hebrewText === null}
                          selectedOriginalIndex={selectedHebrewIndex}
                          onParagraphSelect={handleParagraphSelect} // Pass the updated handler
-                         manualAlignments={manualAlignments} // Still passing, might be removed later
-                         alignmentKey="hebrewIndex"
                          suggestedAlignments={suggestedAlignments}
                          suggestionKey="hebrewParagraphIndex"
                          highlightedSuggestionIndex={highlightedSuggestionTargetIndex} // Highlight based on target

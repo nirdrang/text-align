@@ -7,7 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton
 import { Loader2, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react'; // Import Loader and specific icons
 import { cn } from '@/lib/utils';
-import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
+import type { SuggestedAlignment } from '@/types/alignment';
 import InlineAlignmentControls from './inline-alignment-controls'; // Import the new controls
 import ParagraphBox from './paragraph-box'; // Import the new component
 import { Button } from '@/components/ui/button'; // Import Button
@@ -28,8 +28,6 @@ interface TextAreaPanelProps {
   selectedOriginalIndex: number | null;
   // Callback receives the DISPLAYED index and the language
   onParagraphSelect: (displayedIndex: number, language: 'english' | 'hebrew') => void;
-  manualAlignments: ManualAlignment[]; // Still passing, might be removed
-  alignmentKey: 'englishIndex' | 'hebrewIndex';
   suggestedAlignments: SuggestedAlignment[] | null;
   suggestionKey: 'englishParagraphIndex' | 'hebrewParagraphIndex';
   // Highlight indices are ORIGINAL indices
@@ -67,8 +65,6 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   isLoading = false,
   selectedOriginalIndex, // Use this prop for selection check
   onParagraphSelect,
-  manualAlignments, // Still passing, might be removed
-  alignmentKey,
   suggestedAlignments,
   suggestionKey,
   highlightedSuggestionIndex,
@@ -98,18 +94,6 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
     const hasAttemptedLoad = loadedText !== null;
     const hasContent = hasAttemptedLoad && displayedParagraphs.length > 0;
     const isEmptyAfterLoad = hasAttemptedLoad && displayedParagraphs.length === 0 && !isLoading;
-
-    // Check manual alignment using ORIGINAL indices (might be removed)
-    const isManuallyAligned = (originalIndex: number): boolean => {
-        return manualAlignments.some((link) => link[alignmentKey] === originalIndex);
-    };
-
-    // Get linked partner's ORIGINAL index (might be removed)
-    const getLinkedPartnerIndex = (originalIndex: number): number | null => {
-        const partnerKey = alignmentKey === 'englishIndex' ? 'hebrewIndex' : 'englishIndex';
-        const alignment = manualAlignments.find(link => link[alignmentKey] === originalIndex);
-        return alignment ? alignment[partnerKey] : null;
-    };
 
     // Check suggestion and get confidence using ORIGINAL indices
     const getSuggestionConfidence = (originalIndex: number): number | null => {
