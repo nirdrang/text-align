@@ -5,11 +5,13 @@ import type React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton
-import { Loader2 } from 'lucide-react'; // Import Loader
+import { Loader2, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react'; // Import Loader and specific icons
 import { cn } from '@/lib/utils';
 import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
 import InlineAlignmentControls from './inline-alignment-controls'; // Import the new controls
 import ParagraphBox from './paragraph-box'; // Import the new component
+import { Button } from '@/components/ui/button'; // Import Button
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip components
 
 interface DisplayedParagraph {
     paragraph: string;
@@ -39,6 +41,8 @@ interface TextAreaPanelProps {
   onDropParagraph: (originalIndex: number, language: 'english' | 'hebrew') => void;
   hiddenIndices: Set<number>; // Set of ORIGINAL hidden indices
   panelRef: React.RefObject<HTMLDivElement>; // Add ref prop
+  isScrollSyncEnabled: boolean; // Add scroll sync state
+  onToggleScrollSync: () => void; // Add handler for toggling scroll sync
 
   // Optional props for controls (passed to Hebrew panel)
   showControls?: boolean;
@@ -70,6 +74,8 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   onDropParagraph, // Use this prop
   hiddenIndices, // Use this prop
   panelRef, // Use this ref
+  isScrollSyncEnabled, // Use scroll sync state
+  onToggleScrollSync, // Use scroll sync handler
   showControls = false,
   onLink,
   onUnlink,
@@ -128,112 +134,137 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 
 
     return (
-        <Card className="flex flex-col h-full shadow-md">
-        <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
-            <CardTitle className="text-lg">{title}</CardTitle>
-            {showControls && onLink && onUnlink && onSuggest && (
-            <InlineAlignmentControls
-                onLink={onLink}
-                onUnlink={onUnlink}
-                onSuggest={onSuggest}
-                canLink={canLink}
-                canUnlink={canUnlink}
-                isSuggesting={isSuggesting}
-                hasSuggestions={hasSuggestions}
-                disabled={controlsDisabled}
-            />
-            )}
-        </CardHeader>
-        <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
-            {/* The ref is passed to the ScrollArea, which is the container for scrolling */}
-            <ScrollArea className="flex-grow px-4 pb-4" ref={panelRef as React.RefObject<any> /* Type assertion needed as ScrollArea ref type might be complex */}>
-                <div className="space-y-2 outline-none" tabIndex={0}>
-                {isLoading ? (
-                <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <p className="text-muted-foreground">Loading {title} paragraphs...</p>
-                </div>
-                ) : !hasAttemptedLoad ? (
-                <div className="flex flex-col items-center justify-center h-full p-10 text-center">
-                    <p className="text-muted-foreground">
-                        {`Enter URLs above and click 'Fetch' to load the ${title} content.`}
-                    </p>
-                </div>
-                 ) : isEmptyAfterLoad ? (
-                 <p className="text-muted-foreground p-3 text-center italic">
-                     {`No paragraphs detected or all paragraphs were filtered out as metadata in the ${title} text. Check URL, content structure, or metadata filtering settings.`}
-                 </p>
-                ) : hasContent ? (
-                 // Iterate over DISPLAYED paragraphs
-                displayedParagraphs.map((item, displayedIndex) => {
-                     const { paragraph, originalIndex } = item; // Get original index
-
-                    // Checks use ORIGINAL indices
-                    const isSelected = selectedOriginalIndex === originalIndex;
-                    const manuallyAligned = isManuallyAligned(originalIndex);
-                    const linkedPartnerOriginalIndex = getLinkedPartnerIndex(originalIndex);
-                    const suggestionConfidence = getSuggestionConfidence(originalIndex);
-                    const isSuggested = suggestionConfidence !== null;
-                    const suggestionPartnerOriginalIndex = getSuggestionPartnerIndex(originalIndex);
-                    const isHighlightedSuggestion = highlightedSuggestionIndex === originalIndex;
-                    const isLinkedHighlight = linkedHighlightIndex === originalIndex;
-
-                    const highlightStyle: React.CSSProperties = {};
-                    if ((isHighlightedSuggestion || isLinkedHighlight) && suggestedAlignments) {
-                         // Find confidence based on ORIGINAL indices
-                        const confidence = isHighlightedSuggestion
-                            ? suggestionConfidence
-                            : suggestedAlignments.find(s => {
-                                    const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
-                                     // Check against the correct partner index (which is the highlightedSuggestionIndex)
-                                    return s[partnerKey] === originalIndex && s[suggestionKey] === highlightedSuggestionIndex;
-                                })?.confidence ?? null;
-
-                        if (confidence !== null) {
-                            highlightStyle.backgroundColor = getHighlightColor(confidence);
-                            highlightStyle.boxShadow = '0 0 0 1px hsl(var(--primary) / 0.6)';
-                        }
-                    }
-
-                     // Get displayed indices for tooltips
-                     const linkedPartnerDisplayedIndex = linkedPartnerOriginalIndex !== null ? getDisplayedIndex(linkedPartnerOriginalIndex) : null;
-                     const suggestionPartnerDisplayedIndex = suggestionPartnerOriginalIndex !== null ? getDisplayedIndex(suggestionPartnerOriginalIndex) : null;
-
-                    return (
-                        <ParagraphBox
-                            key={originalIndex} // Use original index as key for stability
-                            displayedIndex={displayedIndex} // Pass displayed index for selection callback
-                            originalIndex={originalIndex} // Pass original index for data attributes and drop callback
-                            paragraph={paragraph}
-                            isSelected={isSelected}
-                            isManuallyAligned={manuallyAligned}
-                            isSuggested={isSuggested}
-                            isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight}
-                            highlightStyle={highlightStyle}
-                            isHebrew={title === 'Hebrew'}
-                            // Pass DISPLAYED index to selection handler
-                            onSelect={() => onParagraphSelect(displayedIndex, language)}
-                            // Pass DISPLAYED indices for tooltips
-                            linkedPartnerIndex={linkedPartnerDisplayedIndex}
-                            suggestionPartnerIndex={suggestionPartnerDisplayedIndex}
-                            suggestionConfidence={suggestionConfidence}
-                            // Pass ORIGINAL index to drop handler
-                            onDrop={() => onDropParagraph(originalIndex, language)}
-                            // Add a class for easier selection in IntersectionObserver
-                             className="paragraph-box"
-                        />
-                    );
-                })
-                ) : ( // Should not be reached if isEmptyAfterLoad is correct, but kept as fallback
-                <p className="text-muted-foreground p-3 text-center italic">
-                    An unexpected error occurred displaying paragraphs.
-                </p>
+        <TooltipProvider delayDuration={100}> {/* Ensure TooltipProvider wraps the Card */}
+            <Card className="flex flex-col h-full shadow-md">
+            <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
+                 <div className="flex items-center space-x-2"> {/* Container for title and sync button */}
+                    <CardTitle className="text-lg">{title}</CardTitle>
+                     {/* Scroll Sync Toggle Button - positioned next to the title */}
+                     <Tooltip>
+                        <TooltipTrigger asChild>
+                             <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={onToggleScrollSync}
+                                className={cn(
+                                    "h-7 w-7 text-muted-foreground",
+                                    isScrollSyncEnabled ? "text-primary" : ""
+                                )}
+                                aria-label={isScrollSyncEnabled ? "Disable Scroll Sync" : "Enable Scroll Sync"}
+                            >
+                                {isScrollSyncEnabled ? <LinkIcon className="h-4 w-4" /> : <LinkOffIcon className="h-4 w-4" />}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>{isScrollSyncEnabled ? "Disable Scroll Sync" : "Enable Scroll Sync"}</p>
+                        </TooltipContent>
+                     </Tooltip>
+                 </div>
+                {showControls && onLink && onUnlink && onSuggest && (
+                <InlineAlignmentControls
+                    onLink={onLink}
+                    onUnlink={onUnlink}
+                    onSuggest={onSuggest}
+                    canLink={canLink}
+                    canUnlink={canUnlink}
+                    isSuggesting={isSuggesting}
+                    hasSuggestions={hasSuggestions}
+                    disabled={controlsDisabled}
+                />
                 )}
-            </div>
-            </ScrollArea>
-        </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
+                {/* The ref is passed to the ScrollArea, which is the container for scrolling */}
+                <ScrollArea className="flex-grow px-4 pb-4" ref={panelRef as React.RefObject<any> /* Type assertion needed as ScrollArea ref type might be complex */}>
+                    <div className="space-y-2 outline-none" tabIndex={0}>
+                    {isLoading ? (
+                    <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="text-muted-foreground">Loading {title} paragraphs...</p>
+                    </div>
+                    ) : !hasAttemptedLoad ? (
+                    <div className="flex flex-col items-center justify-center h-full p-10 text-center">
+                        <p className="text-muted-foreground">
+                            {`Enter URLs above and click 'Fetch' to load the ${title} content.`}
+                        </p>
+                    </div>
+                    ) : isEmptyAfterLoad ? (
+                    <p className="text-muted-foreground p-3 text-center italic">
+                        {`No paragraphs detected or all paragraphs were filtered out as metadata in the ${title} text. Check URL, content structure, or metadata filtering settings.`}
+                    </p>
+                    ) : hasContent ? (
+                    // Iterate over DISPLAYED paragraphs
+                    displayedParagraphs.map((item, displayedIndex) => {
+                        const { paragraph, originalIndex } = item; // Get original index
+
+                        // Checks use ORIGINAL indices
+                        const isSelected = selectedOriginalIndex === originalIndex;
+                        const manuallyAligned = isManuallyAligned(originalIndex);
+                        const linkedPartnerOriginalIndex = getLinkedPartnerIndex(originalIndex);
+                        const suggestionConfidence = getSuggestionConfidence(originalIndex);
+                        const isSuggested = suggestionConfidence !== null;
+                        const suggestionPartnerOriginalIndex = getSuggestionPartnerIndex(originalIndex);
+                        const isHighlightedSuggestion = highlightedSuggestionIndex === originalIndex;
+                        const isLinkedHighlight = linkedHighlightIndex === originalIndex;
+
+                        const highlightStyle: React.CSSProperties = {};
+                        if ((isHighlightedSuggestion || isLinkedHighlight) && suggestedAlignments) {
+                            // Find confidence based on ORIGINAL indices
+                            const confidence = isHighlightedSuggestion
+                                ? suggestionConfidence
+                                : suggestedAlignments.find(s => {
+                                        const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
+                                        // Check against the correct partner index (which is the highlightedSuggestionIndex)
+                                        return s[partnerKey] === originalIndex && s[suggestionKey] === highlightedSuggestionIndex;
+                                    })?.confidence ?? null;
+
+                            if (confidence !== null) {
+                                highlightStyle.backgroundColor = getHighlightColor(confidence);
+                                highlightStyle.boxShadow = '0 0 0 1px hsl(var(--primary) / 0.6)';
+                            }
+                        }
+
+                        // Get displayed indices for tooltips
+                        const linkedPartnerDisplayedIndex = linkedPartnerOriginalIndex !== null ? getDisplayedIndex(linkedPartnerOriginalIndex) : null;
+                        const suggestionPartnerDisplayedIndex = suggestionPartnerOriginalIndex !== null ? getDisplayedIndex(suggestionPartnerOriginalIndex) : null;
+
+                        return (
+                            <ParagraphBox
+                                key={originalIndex} // Use original index as key for stability
+                                displayedIndex={displayedIndex} // Pass displayed index for selection callback
+                                originalIndex={originalIndex} // Pass original index for data attributes and drop callback
+                                paragraph={paragraph}
+                                isSelected={isSelected}
+                                isManuallyAligned={manuallyAligned}
+                                isSuggested={isSuggested}
+                                isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight}
+                                highlightStyle={highlightStyle}
+                                isHebrew={title === 'Hebrew'}
+                                // Pass DISPLAYED index to selection handler
+                                onSelect={() => onParagraphSelect(displayedIndex, language)}
+                                // Pass DISPLAYED indices for tooltips
+                                linkedPartnerIndex={linkedPartnerDisplayedIndex}
+                                suggestionPartnerIndex={suggestionPartnerDisplayedIndex}
+                                suggestionConfidence={suggestionConfidence}
+                                // Pass ORIGINAL index to drop handler
+                                onDrop={() => onDropParagraph(originalIndex, language)}
+                                // Add a class for easier selection in IntersectionObserver
+                                className="paragraph-box"
+                            />
+                        );
+                    })
+                    ) : ( // Should not be reached if isEmptyAfterLoad is correct, but kept as fallback
+                    <p className="text-muted-foreground p-3 text-center italic">
+                        An unexpected error occurred displaying paragraphs.
+                    </p>
+                    )}
+                </div>
+                </ScrollArea>
+            </CardContent>
+            </Card>
+        </TooltipProvider>
     );
 };
 
 export default TextAreaPanel;
+

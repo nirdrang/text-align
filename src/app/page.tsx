@@ -7,11 +7,11 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Input } from '@/components/ui/input';
  import { Button } from '@/components/ui/button';
  import { Loader2, DownloadCloud } from 'lucide-react';
- import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path might still be needed if the file structure differs
+ import { useDebounce } from '@/hooks/use-debounce';
  import { fetchTexts } from '@/lib/api';
  import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
- import { useLocalStorage } from '@/hooks/use-local-storage'; // Re-import useLocalStorage
+ import { useLocalStorage } from '@/hooks/use-local-storage';
 
 // Throttling function
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
@@ -44,8 +44,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
 
 
  export default function Home() {
-     const [englishUrl, setEnglishUrl] = useLocalStorage('englishUrl', ''); // Use useLocalStorage again
-     const [hebrewUrl, setHebrewUrl] = useLocalStorage('hebrewUrl', ''); // Use useLocalStorage again
+     const [englishUrl, setEnglishUrl] = useLocalStorage('englishUrl', '');
+     const [hebrewUrl, setHebrewUrl] = useLocalStorage('hebrewUrl', '');
      const [englishText, setEnglishText] = useState<string | null>(null);
      const [hebrewText, setHebrewText] = useState<string | null>(null);
      const [isFetching, setIsFetching] = useState(false);
@@ -81,6 +81,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          english: new Set<number>(),
          hebrew: new Set<number>(),
      });
+     // Add state for scroll sync preference, persisted in localStorage
+     const [isScrollSyncEnabled, setIsScrollSyncEnabled] = useLocalStorage('isScrollSyncEnabled', true);
 
      const englishPanelRef = useRef<HTMLDivElement>(null);
      const hebrewPanelRef = useRef<HTMLDivElement>(null);
@@ -510,6 +512,11 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
 
      // New useEffect for scroll synchronization
      useEffect(() => {
+        if (!isScrollSyncEnabled) {
+            console.log('Scroll Sync: Disabled by user preference.');
+            return; // Skip setting up listeners if disabled
+        }
+
         const englishScrollViewport = englishPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
         const hebrewScrollViewport = hebrewPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
 
@@ -610,8 +617,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
             if (hebrewScrollTimeout) clearTimeout(hebrewScrollTimeout);
              console.log('Scroll Sync: Event listeners removed.');
          };
-    // Rerun effect if paragraphs change or viewports become available
-    }, [englishPanelRef, hebrewPanelRef, processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed]);
+    // Rerun effect if paragraphs change, viewports become available, OR scroll sync is toggled
+    }, [englishPanelRef, hebrewPanelRef, processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed, isScrollSyncEnabled]);
 
 
      return (
@@ -685,6 +692,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                          onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.english}
                          panelRef={englishPanelRef} // Pass ref
+                         isScrollSyncEnabled={isScrollSyncEnabled} // Pass down
+                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)} // Pass down toggle handler
                      />
                  </div>
 
@@ -717,10 +726,13 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                          onDropParagraph={handleDropParagraph}
                          hiddenIndices={hiddenIndices.hebrew}
                          panelRef={hebrewPanelRef} // Pass ref
+                         isScrollSyncEnabled={isScrollSyncEnabled} // Pass down
+                         onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)} // Pass down toggle handler
                      />
                  </div>
              </div>
          </div>
      );
  }
+
 
