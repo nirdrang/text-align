@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -105,13 +106,29 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
      return text.split(/(?:\s*\n\s*){2,}/)
          .map(paragraph => paragraph.trim()) // Trim whitespace first
          .filter(paragraph => paragraph !== '') // Filter empty paragraphs
-         .map(paragraph => { // Apply normalization based on language
+         .map((paragraph, index) => { // Apply normalization based on language
+              const originalParagraph = paragraph; // Keep original for comparison
+              let normalizedParagraph: string;
+
               if (language === 'hebrew') {
                  // Keep Nikud for display by default? Let's strip for processing consistency based on user example
-                 return normalizeHebrewPunctuation(paragraph, false);
+                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true); // Keep Nikud
+                 // Log if normalization changed the text
+                 if (originalParagraph !== normalizedParagraph) {
+                    console.log(`[Normalization] Hebrew Paragraph ${index + 1} Changed:`);
+                    console.log("  Before:", originalParagraph);
+                    console.log("  After: ", normalizedParagraph);
+                 }
               } else {
-                 return normalizePunctuation(paragraph); // Use general normalizer for English
+                 normalizedParagraph = normalizePunctuation(originalParagraph); // Use general normalizer for English
+                  // Log if normalization changed the text (Optional: can be noisy for English)
+                 // if (originalParagraph !== normalizedParagraph) {
+                 //    console.log(`[Normalization] English Paragraph ${index + 1} Changed:`);
+                 //    console.log("  Before:", originalParagraph);
+                 //    console.log("  After: ", normalizedParagraph);
+                 // }
               }
+              return normalizedParagraph;
          });
  }
 
@@ -265,8 +282,12 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
              const hebrewParagraphs = parseParagraphs(fetchedHebrew, 'hebrew');
              const englishParagraphsWithIndices = assignOriginalIndices(englishParagraphs);
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
-             console.log(`[Normalization] Parsed English Paragraphs (first 1):`, englishParagraphsWithIndices[0]?.paragraph.substring(0, 100));
-             console.log(`[Normalization] Parsed Hebrew Paragraphs (first 1):`, hebrewParagraphsWithIndices[0]?.paragraph.substring(0, 100));
+             console.log(`[Post-Normalization] Parsed English Paragraphs Count: ${englishParagraphsWithIndices.length}`);
+             console.log(`[Post-Normalization] Parsed Hebrew Paragraphs Count: ${hebrewParagraphsWithIndices.length}`);
+             // Optionally log first few normalized paragraphs for verification
+             // console.log(`[Post-Normalization] First English Paragraph:`, englishParagraphsWithIndices[0]?.paragraph.substring(0, 100));
+             // console.log(`[Post-Normalization] First Hebrew Paragraph:`, hebrewParagraphsWithIndices[0]?.paragraph.substring(0, 100));
+
 
               // Automatically identify and hide metadata paragraphs *only if hiddenIndices is currently empty*
              const newHiddenIndices = {
@@ -1048,3 +1069,4 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
          </div>
      );
  }
+
