@@ -1,25 +1,25 @@
-
 "use client";
 
 import type React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react'; // Removed RefreshCw
+import { Loader2, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import InlineAlignmentControls from './inline-alignment-controls';
 import ParagraphBox from './paragraph-box';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-interface DisplayedParagraph {
+// Interface for displayed paragraphs - Adjusted to match page.tsx
+interface DisplayedParagraphData {
     paragraph: string;
     originalIndex: number;
 }
 
 interface TextAreaPanelProps {
   title: string;
-  displayedParagraphs: DisplayedParagraph[];
+  displayedParagraphs: DisplayedParagraphData[]; // Updated type
   isLoading?: boolean;
   selectedOriginalIndex: number | null;
   onParagraphSelect: (displayedIndex: number, language: 'english' | 'hebrew') => void;
@@ -41,7 +41,6 @@ interface TextAreaPanelProps {
   controlsDisabled?: boolean;
   onMergeUp?: (displayedIndex: number) => void;
   onMergeDown?: (displayedIndex: number) => void;
-  // Removed scoring related props
 }
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
@@ -66,17 +65,11 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   controlsDisabled = false,
   onMergeUp,
   onMergeDown,
-  // Removed scoring related props
 }) => {
 
     const hasAttemptedLoad = loadedText !== null;
     const hasContent = hasAttemptedLoad && displayedParagraphs.length > 0;
     const isEmptyAfterLoad = hasAttemptedLoad && displayedParagraphs.length === 0 && !isLoading;
-
-    const getDisplayedIndex = (originalIndex: number): number | null => {
-         const index = displayedParagraphs.findIndex(item => item.originalIndex === originalIndex);
-         return index !== -1 ? index : null;
-     };
 
     return (
         <TooltipProvider delayDuration={100}>
@@ -110,7 +103,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     onUnlink={onUnlink}
                     canConfirmPair={canConfirmPair}
                     canUnlink={canUnlink}
-                    disabled={controlsDisabled} // Removed scoring check
+                    disabled={controlsDisabled}
                 />
                 )}
             </CardHeader>
@@ -134,14 +127,12 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     </p>
                     ) : hasContent ? (
                     displayedParagraphs.map((item, displayedIndex) => {
-                        const { paragraph, originalIndex } = item; // Removed score, isParaScoring
+                        const { paragraph, originalIndex } = item;
                         const isSelected = selectedOriginalIndex === originalIndex;
-
-                        // Removed score display logic
 
                         return (
                             <ParagraphBox
-                                key={`${language}-${originalIndex}`}
+                                key={`${language}-${originalIndex}-${paragraph.length}`} // More specific key
                                 displayedIndex={displayedIndex}
                                 originalIndex={originalIndex}
                                 paragraph={paragraph}
@@ -152,7 +143,6 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                                 className="paragraph-box"
                                 onMergeUp={language === 'hebrew' ? onMergeUp : undefined}
                                 onMergeDown={language === 'hebrew' ? onMergeDown : undefined}
-                                // Removed scoring related props
                             />
                         );
                     })

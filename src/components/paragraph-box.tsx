@@ -1,17 +1,16 @@
-
 "use client";
 
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Trash2, Merge } from 'lucide-react'; // Removed RefreshCw
+import { Trash2, Merge } from 'lucide-react'; // Removed RefreshCw, AlertTriangle, Loader2
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu"
+} from "@/components/ui/context-menu";
 
 interface ParagraphBoxProps {
     displayedIndex: number;
@@ -24,7 +23,6 @@ interface ParagraphBoxProps {
     onMergeUp?: (displayedIndex: number) => void;
     onMergeDown?: (displayedIndex: number) => void;
     className?: string;
-    // Removed scoring related props
 }
 
 const ParagraphBox: React.FC<ParagraphBoxProps> = ({
@@ -38,7 +36,6 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
     onMergeUp,
     onMergeDown,
     className,
-    // Removed scoring related props
 }) => {
 
     const handleDropClick = (e: React.MouseEvent) => {
@@ -58,33 +55,31 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
          }
      };
 
-    // Removed handleScoreClick
-
-    const titleText = `Paragraph ${displayedIndex + 1}`; // Simplified title
 
     const paragraphContent = (
         <div
             onClick={() => onSelect(displayedIndex)}
             className={cn(
                 'relative group p-3 rounded-md cursor-pointer transition-all duration-150 ease-in-out border',
-                'text-xs leading-relaxed',
+                'text-sm leading-relaxed', // Slightly larger text
                 isSelected
                     ? 'ring-2 ring-primary ring-offset-2 bg-primary/10 shadow-inner'
                     : 'bg-card hover:bg-secondary/60',
-                 'border-border', // Simplified border
+                 'border-border',
                  isHebrew ? 'rtl text-right' : 'ltr text-left',
+                 'min-h-[40px]', // Ensure minimum height
                  className
             )}
             data-original-index={originalIndex}
             data-displayed-index={displayedIndex}
-            title={titleText}
+            // Tooltip title is less necessary with visible controls/score
+            // title={`Paragraph ${displayedIndex + 1} (Original Index: ${originalIndex})`}
         >
             {/* Controls Container (top-right or top-left) */}
              <div className={cn(
                  "absolute top-1 flex items-center space-x-1",
                  isHebrew ? "left-1" : "right-1"
              )}>
-                {/* Removed Score Display/Button */}
 
                 {/* Drop Button */}
                  <Tooltip>
@@ -108,6 +103,7 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
 
             {/* Paragraph Content */}
             {paragraph ? (
+                 // Replace single space merge delimiter with nothing for display
                 <span dangerouslySetInnerHTML={{ __html: paragraph.replace(/\n/g, '<br />') }} />
             ) : (
                 <span className="text-muted-foreground italic">Empty paragraph</span>
@@ -115,6 +111,7 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
         </div>
     );
 
+     // Merge context menu only for Hebrew paragraphs
      if (isHebrew && (onMergeUp || onMergeDown)) {
          return (
              <TooltipProvider delayDuration={100}>
@@ -122,13 +119,13 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
                      <ContextMenuTrigger>{paragraphContent}</ContextMenuTrigger>
                      <ContextMenuContent>
                          {onMergeUp && (
-                             <ContextMenuItem onClick={handleMergeUpClick} > {/* Removed scoring disable */}
+                             <ContextMenuItem onClick={handleMergeUpClick}>
                                  <Merge className="mr-2 h-4 w-4 transform rotate-180" />
                                  Merge Up
                              </ContextMenuItem>
                          )}
                          {onMergeDown && (
-                             <ContextMenuItem onClick={handleMergeDownClick} > {/* Removed scoring disable */}
+                             <ContextMenuItem onClick={handleMergeDownClick}>
                                  <Merge className="mr-2 h-4 w-4" />
                                  Merge Down
                              </ContextMenuItem>
@@ -139,6 +136,7 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
          );
      }
 
+    // Standard TooltipProvider for non-Hebrew or if no merge needed
      return (
          <TooltipProvider delayDuration={100}>
              {paragraphContent}
