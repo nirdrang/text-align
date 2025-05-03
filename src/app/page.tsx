@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
  import { useLocalStorage } from '@/hooks/use-local-storage';
+import { useToast } from '@/hooks/use-toast'; // Import useToast
 
 // Throttling function
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (...args: Parameters<T>) => void {
@@ -90,6 +91,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
     const [isUserScrolling, setIsUserScrolling] = useState(true); // Initialize to true
     const lastScrollTimeRef = useRef(0); // Ref to store the last scroll event time
 
+    const { toast } = useToast(); // Initialize toast
+
      const textsAreLoaded = englishText !== null && hebrewText !== null;
 
      const handleEnglishUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,6 +155,11 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
 
         if (!urlToFetchEng.trim() || !urlToFetchHeb.trim()) {
             console.log("URLs not ready for fetching.");
+             toast({
+                 title: "Missing URLs",
+                 description: "Please enter both English and Hebrew URLs.",
+                 variant: "destructive",
+             });
             return;
         }
          setIsFetching(true);
@@ -224,13 +232,17 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              setCanLink(false);
              setCanUnlink(false);
              setControlsDisabled(true); // Start with controls disabled
-         } catch (error) {
+         } catch (error: any) {
              console.error("Failed to fetch texts:", error);
-             // Consider setting an error state to display to the user
+             toast({
+                 title: "Fetch Error",
+                 description: error.message || "Failed to fetch or process text from URLs.",
+                 variant: "destructive",
+             });
          } finally {
              setIsFetching(false);
          }
-     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setManualAlignments, setHiddenIndices, hiddenIndices.english, hiddenIndices.hebrew]); // Include persisted setters and current state in deps
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setManualAlignments, setHiddenIndices, hiddenIndices.english, hiddenIndices.hebrew, toast]); // Include persisted setters and current state in deps
 
      // This useEffect runs when the debounced URLs change
      useEffect(() => {
@@ -346,9 +358,10 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                  setCanLink(false);
                  setCanUnlink(false);
                  setControlsDisabled(true);
+                 toast({ title: "Paragraphs Linked", description: `English paragraph ${selectedEnglishIndex + 1} linked to Hebrew paragraph ${selectedHebrewIndex + 1}.` });
              } else {
                  console.warn("Cannot link: One or both paragraphs are already linked.");
-                 // Optionally show a toast message to the user
+                 toast({ title: "Link Error", description: "One or both selected paragraphs are already linked to other paragraphs.", variant: "destructive" });
              }
          } else {
             console.warn(`Link conditions not met: Eng=${selectedEnglishIndex}, Heb=${selectedHebrewIndex}, canLink=${canLink}`);
@@ -377,6 +390,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              console.log(`Unlinking based on selected Hebrew (${hebIdx}): Found link?`, linkToRemove);
          } else {
             console.warn('Unlink clicked but no paragraph selected.');
+             toast({ title: "Unlink Error", description: "No paragraph selected to unlink.", variant: "destructive" });
          }
 
          if (linkToRemove) {
@@ -384,6 +398,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              const updatedAlignments = manualAlignments.filter(alignment => alignment !== linkToRemove);
              setManualAlignments(updatedAlignments);
              console.log(`Link removed: ${JSON.stringify(linkToRemove)}. New alignments count: ${updatedAlignments.length}`);
+              toast({ title: "Paragraphs Unlinked", description: `Link between English ${linkToRemove.englishIndex + 1} and Hebrew ${linkToRemove.hebrewIndex + 1} removed.` });
 
              // Clear selections and reset button states after unlinking
              setSelectedEnglishIndex(null);
@@ -396,6 +411,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              // This case might happen if canUnlink was true but the find logic failed,
              // potentially due to inconsistent state. Log a warning.
              console.warn(`Unlink clicked and 'canUnlink' was true, but no link found for selected indices (Eng=${engIdx}, Heb=${hebIdx}). Resetting state.`);
+             toast({ title: "Unlink Error", description: "Could not find the link to remove.", variant: "destructive" });
              setSelectedEnglishIndex(null);
              setSelectedHebrewIndex(null);
              setCanLink(false);
@@ -408,6 +424,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
      const handleSuggest = async () => {
          if (!englishText || !hebrewText) {
              console.warn("Cannot suggest alignment: Texts not loaded.");
+              toast({ title: "Suggestion Error", description: "Please load both texts before suggesting alignments.", variant: "destructive" });
              return;
          }
 
@@ -415,12 +432,15 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          setControlsDisabled(true); // Disable controls during suggestion
          setSuggestedAlignments(null); // Clear previous suggestions
          console.log("Starting AI suggestion...");
+          toast({ title: "AI Suggestion Started", description: "Asking the AI to suggest paragraph alignments..." });
+
 
          try {
              // Use the Genkit flow for suggestions
              const { suggestParagraphAlignment } = await import('@/ai/flows/suggest-paragraph-alignment');
 
              // Create the texts with double newlines as expected by the AI prompt
+             // Use ORIGINAL paragraphs for the AI
              const englishTextForAI = processedParagraphs.english.original.map(p => p.paragraph).join('\n\n');
              const hebrewTextForAI = processedParagraphs.hebrew.original.map(p => p.paragraph).join('\n\n');
              console.log(`Sending text to AI: Eng length=${englishTextForAI.length}, Heb length=${hebrewTextForAI.length}`);
@@ -448,15 +468,16 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              console.log(`Filtered AI Suggestions (visible paragraphs only): ${validSuggestions.length} suggestions`);
 
              setSuggestedAlignments(validSuggestions);
+              toast({ title: "AI Suggestions Ready", description: `Received ${validSuggestions.length} alignment suggestions.` });
 
              // Clear specific highlights for single suggestion (might be redundant but safe)
              setHighlightedSuggestionIndex(null);
              setHighlightedSuggestionTargetIndex(null);
 
 
-         } catch (error) {
+         } catch (error: any) {
              console.error("Failed to get AI suggestions:", error);
-             // Handle error appropriately (e.g., display an error message using a toast)
+             toast({ title: "AI Suggestion Failed", description: error.message || "An error occurred while getting suggestions.", variant: "destructive" });
              setSuggestedAlignments([]); // Clear suggestions on error
          } finally {
              setIsSuggesting(false);
@@ -482,6 +503,8 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
 
      const handleDropParagraph = (originalIndex: number, language: 'english' | 'hebrew') => {
          console.log(`Hiding paragraph: Lang=${language}, OriginalIdx=${originalIndex}`);
+          toast({ title: "Paragraph Hidden", description: `${language.charAt(0).toUpperCase() + language.slice(1)} paragraph ${originalIndex + 1} hidden.` });
+
 
          // Update the hidden indices state immutably
          const currentHiddenLang = hiddenIndices[language] || new Set(); // Ensure it's a Set
@@ -563,6 +586,147 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          setControlsDisabled(!(currentCanLink || currentCanUnlink));
 
      };
+
+     // --- MERGE FUNCTIONALITY ---
+     const handleMergeUp = (displayedIndex: number) => {
+        console.log(`Attempting to merge Hebrew paragraph ${displayedIndex} UP`);
+        if (displayedIndex <= 0) {
+             toast({ title: "Merge Error", description: "Cannot merge the first paragraph up.", variant: "destructive" });
+             return; // Cannot merge up the first paragraph
+        }
+
+        setProcessedParagraphs(prev => {
+            const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
+             if (displayedIndex >= displayedHebrew.length) return prev; // Index out of bounds check
+
+            const targetParagraph = displayedHebrew[displayedIndex - 1];
+            const sourceParagraph = displayedHebrew[displayedIndex];
+
+            // Create the merged paragraph text
+            const mergedText = `${targetParagraph.paragraph}\n\n${sourceParagraph.paragraph}`; // Add double newline between merged paragraphs
+
+            // Create the new paragraph object, keeping the originalIndex of the *target* (upper) paragraph
+            const mergedParagraph = { ...targetParagraph, paragraph: mergedText };
+
+             // Update the original paragraph list (find by originalIndex and update)
+             const originalIndexToUpdate = targetParagraph.originalIndex;
+             const newOriginalHebrew = prev.hebrew.original.map(p =>
+                 p.originalIndex === originalIndexToUpdate ? { ...p, paragraph: mergedText } : p
+             );
+
+            // Remove the source paragraph from the displayed list
+            const newDisplayedHebrew = [
+                ...displayedHebrew.slice(0, displayedIndex - 1), // Elements before target
+                mergedParagraph,                             // The merged paragraph
+                ...displayedHebrew.slice(displayedIndex + 1)   // Elements after source
+            ];
+
+            // --- Update Alignments ---
+            // Remove any alignments involving the *source* paragraph's original index
+            const sourceOriginalIndex = sourceParagraph.originalIndex;
+            const newManualAlignments = manualAlignments.filter(a => a.hebrewIndex !== sourceOriginalIndex);
+            const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== sourceOriginalIndex) ?? null;
+
+            // Update alignments pointing to paragraphs *after* the merged source
+            // Note: We don't need to shift indices because we are removing an element,
+            // the indices of subsequent elements in the *original* array remain the same.
+            // The AI prompt uses original indices, so they should remain stable.
+
+            // --- Update Hidden Indices ---
+            // Remove the source paragraph's original index from hidden set if present
+            const newHebrewHidden = new Set(hiddenIndices.hebrew);
+            newHebrewHidden.delete(sourceOriginalIndex);
+
+
+            // --- Update State ---
+            setManualAlignments(newManualAlignments); // Persist alignment changes
+            setSuggestedAlignments(newSuggestedAlignments);
+            setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden })); // Persist hidden index change
+            setSelectedHebrewIndex(null); // Deselect Hebrew after merge
+            setSelectedEnglishIndex(null); // Deselect English too for consistency
+            setCanLink(false);
+            setCanUnlink(false);
+            setControlsDisabled(true);
+
+            toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex}.` });
+            console.log(`Merged up: Target originalIdx=${originalIndexToUpdate}, Source originalIdx=${sourceOriginalIndex}`);
+
+            return {
+                 ...prev,
+                 hebrew: {
+                    original: newOriginalHebrew, // Update original text as well
+                    displayed: newDisplayedHebrew,
+                 },
+            };
+        });
+     };
+
+      const handleMergeDown = (displayedIndex: number) => {
+        console.log(`Attempting to merge Hebrew paragraph ${displayedIndex} DOWN`);
+        setProcessedParagraphs(prev => {
+             const displayedHebrew = [...prev.hebrew.displayed]; // Work with a copy
+             if (displayedIndex >= displayedHebrew.length - 1) {
+                  toast({ title: "Merge Error", description: "Cannot merge the last paragraph down.", variant: "destructive" });
+                  return prev; // Cannot merge down the last paragraph
+             }
+
+            const sourceParagraph = displayedHebrew[displayedIndex];
+            const targetParagraph = displayedHebrew[displayedIndex + 1];
+
+            // Create the merged paragraph text
+            const mergedText = `${sourceParagraph.paragraph}\n\n${targetParagraph.paragraph}`; // Add double newline
+
+            // Create the new paragraph object, keeping the originalIndex of the *source* (upper) paragraph
+            const mergedParagraph = { ...sourceParagraph, paragraph: mergedText };
+
+            // Update the original paragraph list (find by originalIndex and update)
+            const originalIndexToUpdate = sourceParagraph.originalIndex;
+             const newOriginalHebrew = prev.hebrew.original.map(p =>
+                 p.originalIndex === originalIndexToUpdate ? { ...p, paragraph: mergedText } : p
+             );
+
+            // Remove the target paragraph from the displayed list
+            const newDisplayedHebrew = [
+                ...displayedHebrew.slice(0, displayedIndex), // Elements before source
+                mergedParagraph,                          // The merged paragraph
+                ...displayedHebrew.slice(displayedIndex + 2) // Elements after target
+            ];
+
+            // --- Update Alignments ---
+            const targetOriginalIndex = targetParagraph.originalIndex;
+            const newManualAlignments = manualAlignments.filter(a => a.hebrewIndex !== targetOriginalIndex);
+            const newSuggestedAlignments = suggestedAlignments?.filter(s => s.hebrewParagraphIndex !== targetOriginalIndex) ?? null;
+
+             // --- Update Hidden Indices ---
+             const newHebrewHidden = new Set(hiddenIndices.hebrew);
+             newHebrewHidden.delete(targetOriginalIndex);
+
+            // --- Update State ---
+            setManualAlignments(newManualAlignments);
+            setSuggestedAlignments(newSuggestedAlignments);
+             setHiddenIndices(prevHidden => ({...prevHidden, hebrew: newHebrewHidden }));
+            setSelectedHebrewIndex(null);
+            setSelectedEnglishIndex(null);
+            setCanLink(false);
+            setCanUnlink(false);
+            setControlsDisabled(true);
+
+             toast({ title: "Paragraphs Merged", description: `Hebrew paragraph ${displayedIndex + 1} merged into paragraph ${displayedIndex + 2}.` });
+             console.log(`Merged down: Source originalIdx=${originalIndexToUpdate}, Target originalIdx=${targetOriginalIndex}`);
+
+
+            return {
+                 ...prev,
+                 hebrew: {
+                    original: newOriginalHebrew, // Update original text as well
+                    displayed: newDisplayedHebrew,
+                 },
+             };
+        });
+     };
+
+     // --- END MERGE FUNCTIONALITY ---
+
 
      // New useEffect for scroll synchronization
      useEffect(() => {
@@ -788,11 +952,13 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                          panelRef={hebrewPanelRef} // Pass ref
                          isScrollSyncEnabled={isScrollSyncEnabled} // Pass down
                          onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)} // Pass down toggle handler
+                         // Pass merge handlers only to Hebrew panel
+                         onMergeUp={handleMergeUp}
+                         onMergeDown={handleMergeDown}
                      />
                  </div>
              </div>
          </div>
      );
  }
-
 

@@ -13,6 +13,7 @@ import ParagraphBox from './paragraph-box'; // Import the new component
 import { Button } from '@/components/ui/button'; // Import Button
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Import Tooltip components
 
+
 interface DisplayedParagraph {
     paragraph: string;
     originalIndex: number;
@@ -54,6 +55,10 @@ interface TextAreaPanelProps {
   isSuggesting?: boolean;
   hasSuggestions?: boolean;
   controlsDisabled?: boolean;
+
+  // Optional props for merging (passed to Hebrew panel)
+  onMergeUp?: (displayedIndex: number) => void;
+  onMergeDown?: (displayedIndex: number) => void;
 }
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
@@ -85,6 +90,8 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   isSuggesting = false,
   hasSuggestions = false,
   controlsDisabled = false,
+  onMergeUp, // Add merge handler
+  onMergeDown, // Add merge handler
 }) => {
 
     // Determine display state based on loading and loadedText/displayedParagraphs
@@ -230,7 +237,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 
                         return (
                             <ParagraphBox
-                                key={originalIndex} // Use original index as key for stability
+                                key={`${language}-${originalIndex}`} // Use a unique key combining language and original index
                                 displayedIndex={displayedIndex} // Pass displayed index for selection callback
                                 originalIndex={originalIndex} // Pass original index for data attributes and drop callback
                                 paragraph={paragraph}
@@ -239,7 +246,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                                 isSuggested={isSuggested}
                                 isHighlightedSuggestion={isHighlightedSuggestion || isLinkedHighlight}
                                 highlightStyle={highlightStyle}
-                                isHebrew={title === 'Hebrew'}
+                                isHebrew={language === 'hebrew'} // Correctly check if it's Hebrew
                                 // Pass DISPLAYED index to selection handler
                                 onSelect={() => onParagraphSelect(displayedIndex, language)}
                                 // Pass DISPLAYED indices for tooltips
@@ -250,6 +257,9 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                                 onDrop={() => onDropParagraph(originalIndex, language)}
                                 // Add a class for easier selection in IntersectionObserver
                                 className="paragraph-box"
+                                // Pass merge handlers only if it's Hebrew and they exist
+                                onMergeUp={language === 'hebrew' ? onMergeUp : undefined}
+                                onMergeDown={language === 'hebrew' ? onMergeDown : undefined}
                             />
                         );
                     })
@@ -267,4 +277,3 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 };
 
 export default TextAreaPanel;
-
