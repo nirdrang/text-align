@@ -2,7 +2,8 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Link2, Link2Off, BrainCircuit, Loader2 } from 'lucide-react'; // Using BrainCircuit for AI
+import { Link2, Link2Off, BrainCircuit, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils'; // Import cn for conditional styling
 
 interface AlignmentControlsProps {
   onLink: () => void;
@@ -12,6 +13,7 @@ interface AlignmentControlsProps {
   canUnlink: boolean;
   isSuggesting: boolean;
   hasSuggestions: boolean;
+  disabled?: boolean; // Added disabled prop
 }
 
 const AlignmentControls: React.FC<AlignmentControlsProps> = ({
@@ -22,13 +24,17 @@ const AlignmentControls: React.FC<AlignmentControlsProps> = ({
   canUnlink,
   isSuggesting,
   hasSuggestions,
+  disabled = false, // Default to false
 }) => {
   return (
-    <div className="flex flex-col items-center justify-center space-y-4 p-4 h-full">
+    <div className={cn(
+        "flex flex-col items-center justify-center space-y-4 p-4 h-full",
+        disabled && "opacity-50 cursor-not-allowed" // Add opacity and cursor style when disabled
+        )}>
        <h3 className="text-lg font-semibold mb-4 text-center">Alignment Tools</h3>
       <Button
         onClick={onLink}
-        disabled={!canLink}
+        disabled={!canLink || disabled} // Disable if prop says so or if cannot link
         variant="outline"
         className="w-full justify-start transition-colors duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed group hover:bg-accent hover:text-accent-foreground"
         aria-label="Link selected paragraphs"
@@ -38,7 +44,7 @@ const AlignmentControls: React.FC<AlignmentControlsProps> = ({
       </Button>
       <Button
         onClick={onUnlink}
-        disabled={!canUnlink}
+        disabled={!canUnlink || disabled} // Disable if prop says so or if cannot unlink
         variant="outline"
         className="w-full justify-start transition-colors duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed group hover:bg-destructive/10 hover:text-destructive"
         aria-label="Unlink selected paragraphs"
@@ -48,7 +54,7 @@ const AlignmentControls: React.FC<AlignmentControlsProps> = ({
       </Button>
       <Button
         onClick={onSuggest}
-        disabled={isSuggesting}
+        disabled={isSuggesting || disabled} // Disable if prop says so or if currently suggesting
         variant="outline"
         className="w-full justify-start transition-colors duration-200 ease-in-out group hover:bg-primary/10 hover:text-primary"
         aria-label={hasSuggestions ? "Suggest Alignments Again" : "Suggest Alignments"}

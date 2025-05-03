@@ -3,29 +3,90 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import TextAreaPanel from '@/components/text-area-panel';
 import AlignmentControls from '@/components/alignment-controls';
-import { Card } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Loader2, DownloadCloud } from 'lucide-react';
 import { suggestParagraphAlignment } from '@/ai/flows/suggest-paragraph-alignment';
+import { fetchTextFromUrl } from '@/actions/fetch-text'; // Import the server action
 import type { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
 import { useToast } from '@/hooks/use-toast';
 
-
 export default function Home() {
-  const [englishText, setEnglishText] = useState('');
-  const [hebrewText, setHebrewText] = useState('');
+  const [englishUrl, setEnglishUrl] = useState('');
+  const [hebrewUrl, setHebrewUrl] = useState('');
+  const [englishText, setEnglishText] = useState<string | null>(null);
+  const [hebrewText, setHebrewText] = useState<string | null>(null);
+  const [isFetching, setIsFetching] = useState(false);
+
   const [selectedEnglishIndex, setSelectedEnglishIndex] = useState<number | null>(null);
   const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
   const [manualAlignments, setManualAlignments] = useState<ManualAlignment[]>([]);
   const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null); // Index of the *English* paragraph in the highlighted suggestion pair
-  const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null); // Index of the *Hebrew* paragraph in the highlighted suggestion pair
+  const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
+  const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
 
   const { toast } = useToast();
 
   // Split text into paragraphs based on double line breaks
-  const englishParagraphs = useMemo(() => englishText.split(/\n\s*\n/).filter(p => p.trim().length > 0), [englishText]);
-  const hebrewParagraphs = useMemo(() => hebrewText.split(/\n\s*\n/).filter(p => p.trim().length > 0), [hebrewText]);
+  const englishParagraphs = useMemo(() => englishText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [], [englishText]);
+  const hebrewParagraphs = useMemo(() => hebrewText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [], [hebrewText]);
+
+  const textsAreLoaded = englishText !== null && hebrewText !== null;
+
+  // --- Text Fetching Logic ---
+  const handleFetchTexts = useCallback(async () => {
+    if (!englishUrl.trim() || !hebrewUrl.trim()) {
+      toast({ title: "Missing URLs", description: "Please provide both English and Hebrew URLs.", variant: "destructive" });
+      return;
+    }
+    setIsFetching(true);
+    setEnglishText(null);
+    setHebrewText(null);
+    setManualAlignments([]);
+    setSuggestedAlignments(null);
+    setSelectedEnglishIndex(null);
+    setSelectedHebrewIndex(null);
+    setHighlightedSuggestionIndex(null);
+    setHighlightedSuggestionTargetIndex(null);
+
+    try {
+      const [englishResult, hebrewResult] = await Promise.all([
+        fetchTextFromUrl(englishUrl),
+        fetchTextFromUrl(hebrewUrl),
+      ]);
+
+      let hasError = false;
+      if (englishResult.error || !englishResult.text) {
+        toast({ title: "Fetch Error (English)", description: englishResult.error || "Could not fetch or parse English text.", variant: "destructive" });
+        hasError = true;
+      } else {
+        setEnglishText(englishResult.text);
+      }
+
+      if (hebrewResult.error || !hebrewResult.text) {
+        toast({ title: "Fetch Error (Hebrew)", description: hebrewResult.error || "Could not fetch or parse Hebrew text.", variant: "destructive" });
+        hasError = true;
+      } else {
+        setHebrewText(hebrewResult.text);
+      }
+
+      if (!hasError) {
+          toast({ title: "Texts Fetched", description: "English and Hebrew texts loaded successfully." });
+      }
+
+    } catch (error) {
+      console.error("Error fetching texts:", error);
+      toast({ title: "Fetch Error", description: "An unexpected error occurred while fetching texts.", variant: "destructive" });
+      setEnglishText(null); // Ensure text state is reset on error
+      setHebrewText(null);
+    } finally {
+      setIsFetching(false);
+    }
+  }, [englishUrl, hebrewUrl, toast]);
 
 
   // --- Manual Linking Logic ---
@@ -95,8 +156,8 @@ export default function Home() {
   // --- AI Suggestion Logic ---
 
   const handleSuggest = useCallback(async () => {
-    if (!englishText.trim() || !hebrewText.trim()) {
-        toast({ title: "Missing Text", description: "Please provide both English and Hebrew text to get suggestions.", variant: "destructive" });
+    if (!englishText || !hebrewText) {
+        toast({ title: "Missing Text", description: "Fetch English and Hebrew text first.", variant: "destructive" });
         return;
     }
     setIsSuggesting(true);
@@ -176,37 +237,86 @@ export default function Home() {
              }
         };
 
-        const panels = document.querySelectorAll('.english-panel, .hebrew-panel');
-        panels.forEach(panel => {
-            panel.addEventListener('mouseover', handleMouseEnter);
-            panel.addEventListener('mouseout', handleMouseLeave);
-        });
+        // Only attach listeners if texts are loaded
+        if (textsAreLoaded) {
+          const panels = document.querySelectorAll('.english-panel, .hebrew-panel');
+          panels.forEach(panel => {
+              panel.addEventListener('mouseover', handleMouseEnter);
+              panel.addEventListener('mouseout', handleMouseLeave);
+          });
 
-        return () => {
-            panels.forEach(panel => {
-                panel.removeEventListener('mouseover', handleMouseEnter);
-                panel.removeEventListener('mouseout', handleMouseLeave);
-            });
-        };
-    }, [suggestedAlignments]); // Re-run effect if suggestions change
+          return () => {
+              panels.forEach(panel => {
+                  panel.removeEventListener('mouseover', handleMouseEnter);
+                  panel.removeEventListener('mouseout', handleMouseLeave);
+              });
+          };
+        }
+    }, [suggestedAlignments, textsAreLoaded]); // Re-run effect if suggestions or texts change
 
   return (
     <div className="flex flex-col h-screen p-4 bg-background">
        <header className="mb-4">
             <h1 className="text-2xl font-bold text-center text-foreground">Text Aligner</h1>
-            <p className="text-center text-muted-foreground">Align English and Hebrew paragraphs manually or with AI assistance.</p>
+            <p className="text-center text-muted-foreground">Align English and Hebrew paragraphs from URLs or pasted text.</p>
        </header>
-      <div className="flex flex-grow gap-4 min-h-0"> {/* Ensure flex-grow and min-h-0 */}
+
+       {/* URL Input Section */}
+       <Card className="mb-4 shadow-md">
+        <CardHeader>
+          <CardTitle>Load Texts from URLs</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+          <div className="space-y-1">
+            <Label htmlFor="english-url">English URL</Label>
+            <Input
+              id="english-url"
+              type="url"
+              placeholder="https://example.com/english-text"
+              value={englishUrl}
+              onChange={(e) => setEnglishUrl(e.target.value)}
+              disabled={isFetching}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="hebrew-url">Hebrew URL</Label>
+            <Input
+              id="hebrew-url"
+              type="url"
+              placeholder="https://example.com/hebrew-text"
+              value={hebrewUrl}
+              onChange={(e) => setHebrewUrl(e.target.value)}
+              disabled={isFetching}
+              dir="rtl" // Set direction for Hebrew input
+            />
+          </div>
+          <Button
+            onClick={handleFetchTexts}
+            disabled={isFetching || !englishUrl.trim() || !hebrewUrl.trim()}
+            className="w-full md:w-auto"
+          >
+            {isFetching ? (
+              <Loader2 className="mr-2 animate-spin" />
+            ) : (
+              <DownloadCloud className="mr-2" />
+            )}
+            {isFetching ? 'Fetching...' : 'Fetch Texts'}
+          </Button>
+        </CardContent>
+       </Card>
+
+      {/* Alignment Section */}
+      <div className="flex flex-grow gap-4 min-h-0">
         {/* English Panel */}
         <div className="w-5/12 english-panel">
           <TextAreaPanel
             title="English"
-            text={englishText}
+            text={englishText ?? ''} // Provide empty string if null
             paragraphs={englishParagraphs}
-            onTextChange={(e) => {
-              setEnglishText(e.target.value);
-              setSuggestedAlignments(null); // Clear suggestions on text change
-            }}
+            onTextChange={() => {}} // Textarea is now read-only effectively
+            readOnly={true} // Make textarea read-only
+            showTextarea={textsAreLoaded} // Only show textarea if text is loaded
+            isLoading={isFetching}
             selectedIndex={selectedEnglishIndex}
             onParagraphSelect={(index) => handleParagraphSelect(index, 'english')}
             manualAlignments={manualAlignments}
@@ -214,13 +324,13 @@ export default function Home() {
             suggestedAlignments={suggestedAlignments}
             suggestionKey="englishParagraphIndex"
             highlightedSuggestionIndex={highlightedSuggestionIndex}
-            linkedHighlightIndex={highlightedSuggestionTargetIndex} // Pass target index for linked highlighting
+            linkedHighlightIndex={highlightedSuggestionTargetIndex}
           />
         </div>
 
         {/* Controls Panel */}
         <div className="w-2/12 flex items-center justify-center">
-          <Card className="h-fit shadow-md"> {/* Controls card takes needed height */}
+          <Card className="h-fit shadow-md">
               <AlignmentControls
                 onLink={handleLink}
                 onUnlink={handleUnlink}
@@ -229,6 +339,7 @@ export default function Home() {
                 canUnlink={canUnlink}
                 isSuggesting={isSuggesting}
                 hasSuggestions={suggestedAlignments !== null}
+                disabled={!textsAreLoaded || isFetching} // Disable controls if not loaded or fetching
               />
           </Card>
         </div>
@@ -237,20 +348,20 @@ export default function Home() {
          <div className="w-5/12 hebrew-panel">
           <TextAreaPanel
             title="Hebrew"
-            text={hebrewText}
+            text={hebrewText ?? ''} // Provide empty string if null
             paragraphs={hebrewParagraphs}
-            onTextChange={(e) => {
-              setHebrewText(e.target.value)
-              setSuggestedAlignments(null); // Clear suggestions on text change
-              }}
+            onTextChange={() => {}} // Textarea is now read-only effectively
+            readOnly={true} // Make textarea read-only
+            showTextarea={textsAreLoaded} // Only show textarea if text is loaded
+            isLoading={isFetching}
             selectedIndex={selectedHebrewIndex}
             onParagraphSelect={(index) => handleParagraphSelect(index, 'hebrew')}
             manualAlignments={manualAlignments}
             alignmentKey="hebrewIndex"
             suggestedAlignments={suggestedAlignments}
             suggestionKey="hebrewParagraphIndex"
-            highlightedSuggestionIndex={highlightedSuggestionTargetIndex} // Pass target index for highlighting
-            linkedHighlightIndex={highlightedSuggestionIndex} // Pass source index for linked highlighting
+            highlightedSuggestionIndex={highlightedSuggestionTargetIndex}
+            linkedHighlightIndex={highlightedSuggestionIndex}
           />
         </div>
       </div>
