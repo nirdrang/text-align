@@ -364,51 +364,46 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-screen p-4 bg-background">
-       <header className="mb-4">
-            <h1 className="text-2xl font-bold text-center text-foreground">Text Aligner</h1>
-            <p className="text-center text-muted-foreground">Align English and Hebrew paragraphs from URLs or pasted text.</p>
-       </header>
-
-       {/* URL Input Section */}
-       <Card className="mb-4 shadow-md">
-        <CardHeader>
-          <CardTitle>Load Texts from URLs</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+       {/* URL Input Section - Reduced Size */}
+       <Card className="mb-4 shadow-sm"> {/* Reduced shadow */}
+        <CardContent className="grid grid-cols-1 sm:grid-cols-3 gap-2 p-3 items-end"> {/* Reduced padding/gap */}
           <div className="space-y-1">
-            <Label htmlFor="english-url">English URL</Label>
+            <Label htmlFor="english-url" className="text-xs">English URL</Label> {/* Smaller label */}
             <Input
               id="english-url"
               type="url"
-              placeholder="https://example.com/english-text"
+              placeholder="English URL" /* Shorter placeholder */
               value={englishUrl}
-              onChange={handleEnglishUrlChange} // Use the new handler
+              onChange={handleEnglishUrlChange}
               disabled={isFetching || isSuggesting}
+              className="h-8 text-sm" /* Smaller input */
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="hebrew-url">Hebrew URL</Label>
+            <Label htmlFor="hebrew-url" className="text-xs">Hebrew URL</Label> {/* Smaller label */}
             <Input
               id="hebrew-url"
               type="url"
-              placeholder="https://example.com/hebrew-text"
+              placeholder="Hebrew URL" /* Shorter placeholder */
               value={hebrewUrl}
-              onChange={handleHebrewUrlChange} // Use the new handler
+              onChange={handleHebrewUrlChange}
               disabled={isFetching || isSuggesting}
-              dir="rtl" // Set direction for Hebrew input
+              dir="rtl"
+              className="h-8 text-sm" /* Smaller input */
             />
           </div>
           <Button
             onClick={handleFetchTexts}
             disabled={isFetching || isSuggesting || !englishUrl.trim() || !hebrewUrl.trim()}
-            className="w-full md:w-auto"
+            className="w-full sm:w-auto h-8 text-xs" /* Smaller button */
+            size="sm" /* Use smaller size */
           >
             {isFetching ? (
-              <Loader2 className="mr-2 animate-spin" />
+              <Loader2 className="mr-1 h-3 w-3 animate-spin" /> /* Smaller icon */
             ) : (
-              <DownloadCloud className="mr-2" />
+              <DownloadCloud className="mr-1 h-3 w-3" /> /* Smaller icon */
             )}
-            {isFetching ? 'Fetching...' : 'Fetch Texts'}
+            {isFetching ? 'Fetching...' : 'Fetch'} {/* Shorter text */}
           </Button>
         </CardContent>
        </Card>
@@ -416,14 +411,10 @@ export default function Home() {
       {/* Alignment Section */}
       <div className="flex flex-grow gap-4 min-h-0">
         {/* English Panel */}
-        <div ref={englishPanelRef} className="w-1/2 english-panel flex flex-col"> {/* Added flex flex-col */}
+        <div ref={englishPanelRef} className="w-1/2 english-panel flex flex-col">
           <TextAreaPanel
             title="English"
-            text={englishText} // Pass null or string
             paragraphs={englishParagraphs}
-            onTextChange={() => {}} // Textarea is read-only
-            readOnly={true}
-            showTextarea={englishText !== null} // Show if attempted load (null means not attempted, '' means error/empty)
             isLoading={isFetching && englishText === null} // Loading only if fetching AND text is still null
             selectedIndex={selectedEnglishIndex}
             onParagraphSelect={(index) => handleParagraphSelect(index, 'english')}
@@ -433,18 +424,16 @@ export default function Home() {
             suggestionKey="englishParagraphIndex"
             highlightedSuggestionIndex={highlightedSuggestionIndex}
             linkedHighlightIndex={highlightedSuggestionTargetIndex}
+            isSourceLanguage={true} // Indicate this is the source for structure
+            loadedText={englishText} // Pass loaded text state
           />
         </div>
 
         {/* Hebrew Panel */}
-         <div ref={hebrewPanelRef} className="w-1/2 hebrew-panel flex flex-col"> {/* Added flex flex-col */}
+         <div ref={hebrewPanelRef} className="w-1/2 hebrew-panel flex flex-col">
           <TextAreaPanel
             title="Hebrew"
-            text={hebrewText} // Pass null or string
             paragraphs={hebrewParagraphs}
-            onTextChange={() => {}} // Textarea is read-only
-            readOnly={true}
-            showTextarea={hebrewText !== null} // Show if attempted load
             isLoading={isFetching && hebrewText === null} // Loading only if fetching AND text is still null
             selectedIndex={selectedHebrewIndex}
             onParagraphSelect={(index) => handleParagraphSelect(index, 'hebrew')}
@@ -463,6 +452,8 @@ export default function Home() {
             isSuggesting={isSuggesting}
             hasSuggestions={suggestedAlignments !== null}
             controlsDisabled={controlsDisabled}
+            isSourceLanguage={false} // Indicate this is NOT the source
+            loadedText={hebrewText} // Pass loaded text state
           />
         </div>
       </div>
