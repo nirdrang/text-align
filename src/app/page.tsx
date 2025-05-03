@@ -5,9 +5,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
  import { Label } from '@/components/ui/label';
  import { Input } from '@/components/ui/input';
- import { Button } from '@/components/ui/button';
+ import { Button } from '@/components/ui/button'; // Import Button
  import { Loader2, DownloadCloud } from 'lucide-react';
- import { useDebounce } from '@/hooks/use-debounce';
+ import { useDebounce } from '@/hooks/use-debounce'; // Corrected import path
  import { fetchTexts } from '@/lib/api';
  import { ManualAlignment, SuggestedAlignment } from '@/types/alignment';
  import TextAreaPanel from '@/components/text-area-panel';
@@ -66,7 +66,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
      });
      const [selectedEnglishIndex, setSelectedEnglishIndex] = useState<number | null>(null);
      const [selectedHebrewIndex, setSelectedHebrewIndex] = useState<number | null>(null);
-     const [manualAlignments, setManualAlignments] = useState<ManualAlignment[]>([]);
+     const [manualAlignments, setManualAlignments] = useLocalStorage<ManualAlignment[]>('manualAlignments', []); // Persist manual alignments
      const [suggestedAlignments, setSuggestedAlignments] = useState<SuggestedAlignment[] | null>(null);
      const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
      const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
@@ -74,10 +74,10 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
      const [canLink, setCanLink] = useState(false);
      const [canUnlink, setCanUnlink] = useState(false);
      const [controlsDisabled, setControlsDisabled] = useState(true);
-     const [hiddenIndices, setHiddenIndices] = useState<{
+     const [hiddenIndices, setHiddenIndices] = useLocalStorage<{ // Persist hidden indices
          english: Set<number>;
          hebrew: Set<number>;
-     }>({
+     }>('hiddenIndices', {
          english: new Set<number>(),
          hebrew: new Set<number>(),
      });
@@ -100,8 +100,57 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          setHebrewUrl(e.target.value);
      };
 
+     // Effect to rehydrate persisted state on client mount
+     useEffect(() => {
+         // Rehydrate manual alignments
+         const storedManualAlignments = localStorage.getItem('manualAlignments');
+         if (storedManualAlignments) {
+             try {
+                 setManualAlignments(JSON.parse(storedManualAlignments));
+             } catch (e) {
+                 console.error("Failed to parse stored manual alignments:", e);
+             }
+         }
+
+         // Rehydrate hidden indices (Set needs special handling)
+         const storedHiddenIndices = localStorage.getItem('hiddenIndices');
+         if (storedHiddenIndices) {
+             try {
+                 const parsed = JSON.parse(storedHiddenIndices);
+                 setHiddenIndices({
+                     english: new Set(parsed.english || []),
+                     hebrew: new Set(parsed.hebrew || []),
+                 });
+             } catch (e) {
+                 console.error("Failed to parse stored hidden indices:", e);
+                 setHiddenIndices({ english: new Set(), hebrew: new Set() }); // Reset on error
+             }
+         }
+
+          // Rehydrate scroll sync preference
+          const storedScrollSync = localStorage.getItem('isScrollSyncEnabled');
+           if (storedScrollSync !== null) { // Check if item exists
+               try {
+                   setIsScrollSyncEnabled(JSON.parse(storedScrollSync));
+               } catch (e) {
+                  console.error("Failed to parse stored scroll sync preference:", e);
+               }
+           }
+
+         // Initial check for fetch based on persisted URLs
+         if (englishUrl && hebrewUrl && !textsAreLoaded) {
+             handleFetchTexts();
+         }
+        // Only run once on mount to rehydrate
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, []);
+
+
      const handleFetchTexts = useCallback(async () => {
-        if (!debouncedEnglishUrl.trim() || !debouncedHebrewUrl.trim()) {
+        const urlToFetchEng = debouncedEnglishUrl || englishUrl; // Use debounced first, fallback to current state
+        const urlToFetchHeb = debouncedHebrewUrl || hebrewUrl;
+
+        if (!urlToFetchEng.trim() || !urlToFetchHeb.trim()) {
             console.log("URLs not ready for fetching.");
             return;
         }
@@ -109,15 +158,15 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          setEnglishText(null); // Reset text state
          setHebrewText(null); // Reset text state
          setProcessedParagraphs({ english: { original: [], displayed: [] }, hebrew: { original: [], displayed: [] } }); // Reset paragraphs
-         setManualAlignments([]); // Reset alignments
+         setManualAlignments([]); // Reset alignments for new text
          setSuggestedAlignments(null);
          setSelectedEnglishIndex(null);
          setSelectedHebrewIndex(null);
-         setHiddenIndices({ english: new Set(), hebrew: new Set() }); // Reset hidden indices
+         // Don't reset hidden indices here, let them persist unless user explicitly resets
 
 
          try {
-             const [english, hebrew] = await fetchTexts(debouncedEnglishUrl, debouncedHebrewUrl);
+             const [english, hebrew] = await fetchTexts(urlToFetchEng, urlToFetchHeb);
              setEnglishText(english);
              setHebrewText(hebrew);
 
@@ -127,28 +176,35 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
              const englishParagraphsWithIndices = assignOriginalIndices(englishParagraphs);
              const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
 
-              // Automatically identify and hide metadata paragraphs
+              // Automatically identify and hide metadata paragraphs *only if hiddenIndices is currently empty*
              const newHiddenIndices = {
-                 english: new Set<number>(),
-                 hebrew: new Set<number>(),
+                 english: new Set(hiddenIndices.english), // Start with persisted/current hidden indices
+                 hebrew: new Set(hiddenIndices.hebrew),
              };
-             englishParagraphsWithIndices.forEach(item => {
-                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
-                     newHiddenIndices.english.add(item.originalIndex);
-                     console.log(`Auto-hiding English paragraph ${item.originalIndex} (short: ${wordCount} words)`);
-                 }
-             });
-             hebrewParagraphsWithIndices.forEach(item => {
-                 const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
-                 if (wordCount <= 20) { // Identify metadata (short paragraphs)
-                      newHiddenIndices.hebrew.add(item.originalIndex);
-                      console.log(`Auto-hiding Hebrew paragraph ${item.originalIndex} (short: ${wordCount} words)`);
-                 }
-             });
-             setHiddenIndices(newHiddenIndices);
 
-             // Initialize with filtered paragraphs
+             // Only auto-hide if the sets were initially empty (i.e., first load or after reset)
+             if (hiddenIndices.english.size === 0 && hiddenIndices.hebrew.size === 0) {
+                 englishParagraphsWithIndices.forEach(item => {
+                     const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                     if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                         newHiddenIndices.english.add(item.originalIndex);
+                         console.log(`Auto-hiding English paragraph ${item.originalIndex} (short: ${wordCount} words)`);
+                     }
+                 });
+                 hebrewParagraphsWithIndices.forEach(item => {
+                     const wordCount = item.paragraph.split(/\s+/).filter(Boolean).length;
+                     if (wordCount <= 20) { // Identify metadata (short paragraphs)
+                          newHiddenIndices.hebrew.add(item.originalIndex);
+                          console.log(`Auto-hiding Hebrew paragraph ${item.originalIndex} (short: ${wordCount} words)`);
+                     }
+                 });
+                 setHiddenIndices(newHiddenIndices); // Update state and persist the auto-detected ones
+             } else {
+                  console.log("Skipping auto-hide for metadata as hidden indices already exist.");
+             }
+
+
+             // Initialize with filtered paragraphs using the potentially updated hiddenIndices
              setProcessedParagraphs({
                  english: {
                      original: englishParagraphsWithIndices,
@@ -160,9 +216,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                  },
              });
 
-             // Clear existing alignments and selections (redundant, but safe)
-             setManualAlignments([]);
-             setSuggestedAlignments(null);
+             // Clear selections and button states
              setSelectedEnglishIndex(null);
              setSelectedHebrewIndex(null);
              setHighlightedSuggestionIndex(null);
@@ -176,16 +230,15 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          } finally {
              setIsFetching(false);
          }
-     }, [debouncedEnglishUrl, debouncedHebrewUrl]); // Removed hiddenIndices from deps as they are set within this function
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, englishUrl, hebrewUrl, setManualAlignments, setHiddenIndices, hiddenIndices.english, hiddenIndices.hebrew]); // Include persisted setters and current state in deps
 
-     // This useEffect runs when the debounced URLs change or when component mounts with persisted URLs
+     // This useEffect runs when the debounced URLs change
      useEffect(() => {
-         if (debouncedEnglishUrl && debouncedHebrewUrl && (!englishText || !hebrewText)) {
-             // Fetch texts if URLs are present and texts are not already loaded (e.g., from initial load with localStorage)
+         // Fetch only if URLs have changed and are valid
+         if (debouncedEnglishUrl && debouncedHebrewUrl && (debouncedEnglishUrl !== englishUrl || debouncedHebrewUrl !== hebrewUrl)) {
              handleFetchTexts();
          }
-         // This effect should only run when URLs change or initially if texts aren't loaded
-     }, [debouncedEnglishUrl, debouncedHebrewUrl, handleFetchTexts, englishText, hebrewText]);
+     }, [debouncedEnglishUrl, debouncedHebrewUrl, handleFetchTexts, englishUrl, hebrewUrl]);
 
       const handleParagraphSelect = (displayedIndex: number, language: 'english' | 'hebrew') => {
         if (!processedParagraphs[language].displayed[displayedIndex]) {
@@ -431,10 +484,11 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          console.log(`Hiding paragraph: Lang=${language}, OriginalIdx=${originalIndex}`);
 
          // Update the hidden indices state immutably
-         const updatedHidden = new Set(hiddenIndices[language]);
+         const currentHiddenLang = hiddenIndices[language] || new Set(); // Ensure it's a Set
+         const updatedHidden = new Set(currentHiddenLang);
          updatedHidden.add(originalIndex);
          const newHiddenIndicesState = { ...hiddenIndices, [language]: updatedHidden };
-         setHiddenIndices(newHiddenIndicesState);
+         setHiddenIndices(newHiddenIndicesState); // This will trigger the useLocalStorage update
 
 
          // Recalculate displayed paragraphs based on the *new* hidden indices state
@@ -475,7 +529,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
          );
          if (updatedManualAlignments.length < manualAlignments.length) {
             console.log(`Removed ${manualAlignments.length - updatedManualAlignments.length} manual alignments involving hidden paragraph ${originalIndex}.`);
-            setManualAlignments(updatedManualAlignments);
+            setManualAlignments(updatedManualAlignments); // Update persisted state
          }
 
 
@@ -536,13 +590,15 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
             for (let i = 0; i < paragraphElements.length; i++) {
                 const pElement = paragraphElements[i];
                 const pRect = pElement.getBoundingClientRect();
-                // Find the first paragraph whose top is at or below the viewport top
-                if (pRect.top >= viewportRect.top - 5) { // Allow small tolerance
+                // Find the first paragraph whose top is AT OR JUST ABOVE the viewport top
+                // Removed tolerance: if (pRect.top >= viewportRect.top - 5) {
+                 if (pRect.top >= viewportRect.top) {
                     // console.log(`Top visible element found at index ${i}:`, pElement);
                     return i;
                 }
             }
-            // If no paragraph is below the top, maybe the last one is partially visible
+             // If loop completes, it means all paragraphs are above the viewport top.
+             // Return the index of the last paragraph if any exist.
             return paragraphElements.length > 0 ? paragraphElements.length - 1 : -1;
         };
 
@@ -560,15 +616,19 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
             const targetElement = targetParagraphElements[currentDisplayedIndex]; // Direct mapping by displayed index
 
             if (targetElement) {
-                const targetTop = targetElement.offsetTop - targetViewport.offsetTop; // Position relative to viewport scroll container
-                console.log(`Sync Scroll: Scrolling target viewport to displayed index ${currentDisplayedIndex} at offsetTop ${targetTop}`);
-                targetViewport.scrollTo({ top: targetTop, behavior: 'auto' }); // Use 'auto' for instant programmatic scroll
+                // Calculate scroll position to bring the target element's top exactly to the viewport's top
+                const targetTopRelativeToScrollContainer = targetElement.offsetTop;
+                // We want targetElement.offsetTop to be equal to targetViewport.scrollTop
+                const scrollToPosition = targetTopRelativeToScrollContainer;
+
+                console.log(`Sync Scroll: Scrolling target viewport to bring displayed index ${currentDisplayedIndex} (offsetTop ${targetTopRelativeToScrollContainer}) to the top.`);
+                targetViewport.scrollTo({ top: scrollToPosition, behavior: 'auto' }); // Use 'auto' for instant programmatic scroll
             } else {
                  // Fallback: If exact index match fails, scroll to the top/bottom or nearest available
                 const fallbackIndex = Math.min(currentDisplayedIndex, targetParagraphElements.length - 1);
                  if (fallbackIndex >= 0) {
                      const fallbackElement = targetParagraphElements[fallbackIndex];
-                     const fallbackTop = fallbackElement.offsetTop - targetViewport.offsetTop;
+                     const fallbackTop = fallbackElement.offsetTop; // Fallback element's top relative to scroll container
                      console.log(`Sync Scroll: Target element at index ${currentDisplayedIndex} not found. Falling back to index ${fallbackIndex} at offsetTop ${fallbackTop}.`);
                      targetViewport.scrollTo({ top: fallbackTop, behavior: 'auto' });
                  } else {
@@ -589,7 +649,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                 console.log('Scroll Sync: Triggered by English scroll.');
                  isProgrammaticScroll = true; // Set flag before syncing
                  syncScroll(englishScrollViewport, hebrewScrollViewport, englishPanelRef, hebrewPanelRef, processedParagraphs.hebrew.displayed);
-                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay
+                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay, slightly longer to let scroll settle
             }, 100); // Debounce/throttle time
         };
 
@@ -601,7 +661,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                  console.log('Scroll Sync: Triggered by Hebrew scroll.');
                  isProgrammaticScroll = true; // Set flag before syncing
                  syncScroll(hebrewScrollViewport, englishScrollViewport, hebrewPanelRef, englishPanelRef, processedParagraphs.english.displayed);
-                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay
+                 setTimeout(() => isProgrammaticScroll = false, 150); // Reset flag after a delay, slightly longer to let scroll settle
              }, 100); // Debounce/throttle time
         };
 
@@ -656,7 +716,7 @@ function throttle<T extends (...args: any[]) => any>(func: T, delay: number): (.
                      </div>
                      <Button
                          onClick={handleFetchTexts}
-                         disabled={isFetching || isSuggesting || !englishUrl.trim() || !hebrewUrl.trim()}
+                         disabled={isFetching || isSuggesting || !(englishUrl || '').trim() || !(hebrewUrl || '').trim()} // Handle null/undefined case for trim
                          className="w-full sm:w-auto h-8 text-xs"
                          size="sm"
                      >
