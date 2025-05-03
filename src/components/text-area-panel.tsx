@@ -88,14 +88,18 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   }
 
   const getHighlightColor = (confidence: number): string => {
-    const greenIntensity = Math.floor(200 * confidence);
-    const redIntensity = Math.floor(150 * (1 - confidence));
-    return `rgba(${redIntensity}, ${greenIntensity}, 0, 0.2)`;
+    // Use a subtle green/blue tint for confidence, avoiding red for better accessibility
+    // Example: Lerp between a light blue (low confidence) and a light teal (high confidence)
+    const hue = 180 + 40 * confidence; // 180 (cyan/blue) to 220 (blue/purple-ish)
+    const saturation = 50 + 20 * confidence; // 50% to 70%
+    const lightness = 90; // Keep it light
+    const alpha = 0.1 + 0.15 * confidence; // 0.1 to 0.25 alpha
+    return `hsla(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
   };
 
   return (
     <Card className="flex flex-col h-full shadow-md">
-      <CardHeader className="flex flex-row items-center justify-between">
+      <CardHeader className="flex flex-row items-center justify-between py-4 px-4"> {/* Adjust padding */}
         <CardTitle>{title}</CardTitle>
          {showControls && onLink && onUnlink && onSuggest && (
            <InlineAlignmentControls
@@ -110,22 +114,24 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
            />
          )}
       </CardHeader>
-      <CardContent className="flex flex-col flex-grow p-0">
+      {/* Make CardContent grow and contain the ScrollArea */}
+      <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
         {showTextarea && (
-          <div className="p-4 pb-0">
+          <div className="px-4 pt-0 pb-2"> {/* Adjust padding */}
             {/* Textarea is hidden and shown based on prop, kept for potential future use */}
              <Textarea
                value={text}
                onChange={onTextChange}
-               placeholder={isLoading ? `Loading ${title} text...` : `Paste ${title} text here...`}
-               className="h-32 mb-4 resize-none bg-card text-card-foreground"
+               placeholder={isLoading ? `Loading ${title} text...` : `Paste ${title} text here or load from URL...`}
+               className="h-24 resize-none bg-card text-card-foreground" // Reduced height
                readOnly={readOnly || isLoading} // Make read-only if fetching or explicitly set
                disabled={isLoading} // Disable while loading
              />
           </div>
         )}
         <ScrollArea className="flex-grow px-4 pb-4">
-          <div className="space-y-2">
+          {/* Added tabindex to make the container focusable for potential keyboard nav */}
+          <div className="space-y-2 outline-none" tabIndex={0}>
             {isLoading ? (
               <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -149,35 +155,37 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                 const isLinkedHighlight = linkedHighlightIndex === index;
 
                 const highlightStyle: React.CSSProperties = {};
-                 if (isHighlightedSuggestion && suggestionConfidence !== null) {
-                  highlightStyle.backgroundColor = getHighlightColor(suggestionConfidence);
-                  highlightStyle.boxShadow = '0 0 0 2px hsl(var(--primary))';
-                } else if (isLinkedHighlight) {
-                  const linkingSuggestion = suggestedAlignments?.find(s => {
-                      const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
-                      return s[partnerKey] === index && s[suggestionKey] === highlightedSuggestionIndex;
-                  });
-                  if(linkingSuggestion){
-                     highlightStyle.backgroundColor = getHighlightColor(linkingSuggestion.confidence);
-                     highlightStyle.boxShadow = '0 0 0 1px hsl(var(--primary) / 0.5)';
-                  }
-                }
+                 if ((isHighlightedSuggestion || isLinkedHighlight) && suggestedAlignments) {
+                      const confidence = isHighlightedSuggestion
+                          ? suggestionConfidence
+                          : suggestedAlignments.find(s => {
+                                const partnerKey = suggestionKey === 'englishParagraphIndex' ? 'hebrewParagraphIndex' : 'englishParagraphIndex';
+                                return s[partnerKey] === index && s[suggestionKey] === highlightedSuggestionIndex;
+                            })?.confidence ?? null;
+
+                      if (confidence !== null) {
+                          highlightStyle.backgroundColor = getHighlightColor(confidence);
+                          // Use a consistent subtle border for both highlighted and linked-highlight
+                          highlightStyle.boxShadow = '0 0 0 1px hsl(var(--primary) / 0.6)';
+                      }
+                 }
+
 
                 return (
                   <div
                     key={index}
                     onClick={() => onParagraphSelect(index)}
                     className={cn(
-                      'p-3 rounded-md cursor-pointer transition-all duration-200 ease-in-out border',
+                      'p-3 rounded-md cursor-pointer transition-all duration-150 ease-in-out border', // Faster transition
                       'text-sm leading-relaxed',
                       isSelected
-                        ? 'ring-2 ring-primary ring-offset-2 bg-primary/10 shadow-inner'
-                        : 'bg-card hover:bg-secondary/80',
+                        ? 'ring-2 ring-primary ring-offset-2 bg-primary/10 shadow-inner' // Keep selection style prominent
+                        : 'bg-card hover:bg-secondary/60', // Slightly less intense hover
                       manuallyAligned
-                        ? 'border-accent border-dashed'
-                        : 'border-border',
-                      isSuggested && !manuallyAligned && 'border-primary/30 border-dotted',
-                      { 'animate-pulse-border': isHighlightedSuggestion || isLinkedHighlight}
+                        ? 'border-accent border-dashed' // Dashed for manual
+                        : isSuggested ? 'border-primary/30 border-dotted' // Dotted for suggested
+                        : 'border-border', // Default border
+                      // Removed animation class - rely on background/box-shadow directly
                     )}
                      style={highlightStyle}
                     data-paragraph-index={index}
@@ -185,31 +193,27 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     {...(isSuggested && {'data-suggested-link': suggestionPartnerIndex, 'data-confidence': suggestionConfidence })}
                   >
                     <p className={title === 'Hebrew' ? 'rtl text-right' : 'ltr text-left'}>
-                      {paragraph || <span className="text-muted-foreground italic">Empty paragraph</span>}
+                      {/* Using dangerouslySetInnerHTML to render potential <br> tags */}
+                      {paragraph ? (
+                           <span dangerouslySetInnerHTML={{ __html: paragraph.replace(/\n/g, '<br />') }} />
+                       ) : (
+                           <span className="text-muted-foreground italic">Empty paragraph</span>
+                       )}
                     </p>
                   </div>
                 );
               })
             ) : (
               <p className="text-muted-foreground p-3 text-center italic">
-                No paragraphs detected in the fetched text. Ensure the source content has paragraphs separated by double line breaks.
+                {text === null ? `Load text to see paragraphs.` : `No paragraphs detected in the fetched text. Ensure the source content has paragraphs separated by double line breaks.`}
               </p>
             )}
           </div>
         </ScrollArea>
       </CardContent>
-      <style jsx>{`
-          @keyframes pulse-border {
-            0%, 100% { box-shadow: 0 0 0 1px hsl(var(--primary) / 0.5); }
-            50% { box-shadow: 0 0 0 3px hsl(var(--primary) / 0.8); }
-          }
-          .animate-pulse-border {
-            animation: pulse-border 1.5s infinite ease-in-out;
-          }
-        `}</style>
+       {/* Remove the separate style tag as animation is removed */}
     </Card>
   );
 };
 
 export default TextAreaPanel;
-```

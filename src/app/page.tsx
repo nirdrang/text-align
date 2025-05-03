@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import TextAreaPanel from '@/components/text-area-panel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -27,6 +27,10 @@ export default function Home() {
   const [highlightedSuggestionIndex, setHighlightedSuggestionIndex] = useState<number | null>(null);
   const [highlightedSuggestionTargetIndex, setHighlightedSuggestionTargetIndex] = useState<number | null>(null);
 
+  // Refs for panel containers to attach listeners
+  const englishPanelRef = useRef<HTMLDivElement>(null);
+  const hebrewPanelRef = useRef<HTMLDivElement>(null);
+
   const { toast } = useToast();
 
   // Split text into paragraphs based on double line breaks
@@ -34,7 +38,7 @@ export default function Home() {
   const hebrewParagraphs = useMemo(() => hebrewText?.split(/\n\s*\n/).filter(p => p.trim().length > 0) ?? [], [hebrewText]);
 
   const textsAreLoaded = englishText !== null && hebrewText !== null;
-  const controlsDisabled = !textsAreLoaded || isFetching;
+  const controlsDisabled = !textsAreLoaded || isFetching || isSuggesting;
 
   // --- Text Fetching Logic ---
   const handleFetchTexts = useCallback(async () => {
@@ -100,7 +104,8 @@ export default function Home() {
 
   const handleLink = useCallback(() => {
     if (canLink && selectedEnglishIndex !== null && selectedHebrewIndex !== null) {
-      setManualAlignments(prev => [...prev, { englishIndex: selectedEnglishIndex, hebrewIndex: selectedHebrewIndex }]);
+      const newAlignment: ManualAlignment = { englishIndex: selectedEnglishIndex, hebrewIndex: selectedHebrewIndex };
+      setManualAlignments(prev => [...prev, newAlignment]);
       // Deselect after linking
       setSelectedEnglishIndex(null);
       setSelectedHebrewIndex(null);
@@ -188,26 +193,30 @@ export default function Home() {
         if (language === 'english') {
             setSelectedEnglishIndex(prev => prev === index ? null : index);
             setSelectedHebrewIndex(null); // Deselect other language
-             setHighlightedSuggestionIndex(null); // Clear suggestion highlight on manual selection
-             setHighlightedSuggestionTargetIndex(null);
+             // Clear suggestion highlight on manual selection - handled by mouse leave/enter
         } else {
             setSelectedHebrewIndex(prev => prev === index ? null : index);
             setSelectedEnglishIndex(null); // Deselect other language
-             setHighlightedSuggestionIndex(null); // Clear suggestion highlight on manual selection
-             setHighlightedSuggestionTargetIndex(null);
+             // Clear suggestion highlight on manual selection - handled by mouse leave/enter
         }
     }, []);
 
 
-    // Highlight suggested pairs on hover (using useEffect for event listeners)
+    // Highlight suggested pairs on hover (using useEffect for event listeners on refs)
     useEffect(() => {
+        const englishPanel = englishPanelRef.current;
+        const hebrewPanel = hebrewPanelRef.current;
+
         const handleMouseEnter = (event: MouseEvent) => {
+            if (!suggestedAlignments || isFetching || isSuggesting) return;
+
             const target = event.target as HTMLElement;
             const paragraphDiv = target.closest('[data-paragraph-index]') as HTMLElement | null;
 
-            if (paragraphDiv && suggestedAlignments) {
+            if (paragraphDiv) {
                 const index = parseInt(paragraphDiv.dataset.paragraphIndex || '-1', 10);
-                const isEnglish = paragraphDiv.closest('.english-panel') !== null; // Check panel context
+                // Determine if it's the English or Hebrew panel based on the event's currentTarget
+                const isEnglish = event.currentTarget === englishPanel;
 
                 if (index !== -1) {
                     const suggestion = suggestedAlignments.find(s =>
@@ -215,43 +224,45 @@ export default function Home() {
                     );
 
                     if (suggestion) {
-                        setHighlightedSuggestionIndex(suggestion.englishParagraphIndex);
-                        setHighlightedSuggestionTargetIndex(suggestion.hebrewParagraphIndex);
+                        // Set highlights immediately, avoid batching issues with rapid movements
+                         setHighlightedSuggestionIndex(suggestion.englishParagraphIndex);
+                         setHighlightedSuggestionTargetIndex(suggestion.hebrewParagraphIndex);
                     } else {
-                        // If hovering over a non-suggested paragraph, clear highlights
-                        setHighlightedSuggestionIndex(null);
-                        setHighlightedSuggestionTargetIndex(null);
+                         setHighlightedSuggestionIndex(null);
+                         setHighlightedSuggestionTargetIndex(null);
                     }
                 }
+            } else {
+                 // If not hovering over a paragraph div directly, clear highlights
+                 setHighlightedSuggestionIndex(null);
+                 setHighlightedSuggestionTargetIndex(null);
             }
         };
 
         const handleMouseLeave = (event: MouseEvent) => {
-             const target = event.target as HTMLElement;
-             const paragraphDiv = target.closest('[data-paragraph-index]') as HTMLElement | null;
-             // Only clear if leaving a paragraph element, prevents clearing when moving mouse within the paragraph
-             if(paragraphDiv){
-                setHighlightedSuggestionIndex(null);
-                setHighlightedSuggestionTargetIndex(null);
-             }
+             // Clear highlights when the mouse leaves either panel container
+             setHighlightedSuggestionIndex(null);
+             setHighlightedSuggestionTargetIndex(null);
         };
 
-        // Only attach listeners if texts are loaded
-        if (textsAreLoaded) {
-          const panels = document.querySelectorAll('.english-panel, .hebrew-panel');
-          panels.forEach(panel => {
-              panel.addEventListener('mouseover', handleMouseEnter);
-              panel.addEventListener('mouseout', handleMouseLeave);
-          });
+        if (textsAreLoaded && englishPanel && hebrewPanel) {
+          // Use mouseover instead of mouseenter to handle events bubbling from children
+          englishPanel.addEventListener('mouseover', handleMouseEnter);
+          hebrewPanel.addEventListener('mouseover', handleMouseEnter);
+          // Use mouseleave to clear when exiting the panel boundaries
+          englishPanel.addEventListener('mouseleave', handleMouseLeave);
+          hebrewPanel.addEventListener('mouseleave', handleMouseLeave);
 
           return () => {
-              panels.forEach(panel => {
-                  panel.removeEventListener('mouseover', handleMouseEnter);
-                  panel.removeEventListener('mouseout', handleMouseLeave);
-              });
+              englishPanel.removeEventListener('mouseover', handleMouseEnter);
+              hebrewPanel.removeEventListener('mouseover', handleMouseEnter);
+              englishPanel.removeEventListener('mouseleave', handleMouseLeave);
+              hebrewPanel.removeEventListener('mouseleave', handleMouseLeave);
           };
         }
-    }, [suggestedAlignments, textsAreLoaded]); // Re-run effect if suggestions or texts change
+    // Dependencies: Re-attach listeners if alignments change or texts load/unload
+    // Also include isFetching/isSuggesting to potentially disable highlights during these states
+    }, [suggestedAlignments, textsAreLoaded, isFetching, isSuggesting]);
 
   return (
     <div className="flex flex-col h-screen p-4 bg-background">
@@ -274,7 +285,7 @@ export default function Home() {
               placeholder="https://example.com/english-text"
               value={englishUrl}
               onChange={(e) => setEnglishUrl(e.target.value)}
-              disabled={isFetching}
+              disabled={isFetching || isSuggesting}
             />
           </div>
           <div className="space-y-1">
@@ -285,13 +296,13 @@ export default function Home() {
               placeholder="https://example.com/hebrew-text"
               value={hebrewUrl}
               onChange={(e) => setHebrewUrl(e.target.value)}
-              disabled={isFetching}
+              disabled={isFetching || isSuggesting}
               dir="rtl" // Set direction for Hebrew input
             />
           </div>
           <Button
             onClick={handleFetchTexts}
-            disabled={isFetching || !englishUrl.trim() || !hebrewUrl.trim()}
+            disabled={isFetching || isSuggesting || !englishUrl.trim() || !hebrewUrl.trim()}
             className="w-full md:w-auto"
           >
             {isFetching ? (
@@ -307,7 +318,7 @@ export default function Home() {
       {/* Alignment Section */}
       <div className="flex flex-grow gap-4 min-h-0">
         {/* English Panel */}
-        <div className="w-1/2 english-panel"> {/* Changed width to 1/2 */}
+        <div ref={englishPanelRef} className="w-1/2 english-panel flex flex-col"> {/* Added flex flex-col */}
           <TextAreaPanel
             title="English"
             text={englishText ?? ''} // Provide empty string if null
@@ -328,7 +339,7 @@ export default function Home() {
         </div>
 
         {/* Hebrew Panel */}
-         <div className="w-1/2 hebrew-panel"> {/* Changed width to 1/2 */}
+         <div ref={hebrewPanelRef} className="w-1/2 hebrew-panel flex flex-col"> {/* Added flex flex-col */}
           <TextAreaPanel
             title="Hebrew"
             text={hebrewText ?? ''} // Provide empty string if null
@@ -360,4 +371,3 @@ export default function Home() {
     </div>
   );
 }
-```
