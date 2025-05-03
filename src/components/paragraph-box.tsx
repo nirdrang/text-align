@@ -23,6 +23,7 @@ interface ParagraphBoxProps {
     linkedPartnerIndex: number | null; // Displayed index of partner
     suggestionPartnerIndex: number | null; // Displayed index of partner
     suggestionConfidence: number | null;
+    className?: string; // Optional className prop
 }
 
 const ParagraphBox: React.FC<ParagraphBoxProps> = ({
@@ -40,6 +41,7 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
     linkedPartnerIndex,
     suggestionPartnerIndex,
     suggestionConfidence,
+    className, // Destructure className
 }) => {
 
     const handleDropClick = (e: React.MouseEvent) => {
@@ -69,7 +71,8 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
                         ? 'border-primary/30 border-dotted'
                         : 'border-border',
                     isHighlightedSuggestion && 'shadow-md',
-                    isHebrew ? 'rtl text-right' : 'ltr text-left'
+                    isHebrew ? 'rtl text-right' : 'ltr text-left',
+                    className // Apply the passed className
                 )}
                 style={isHighlightedSuggestion ? highlightStyle : {}}
                 data-original-index={originalIndex} // Use original index for potential external interactions
@@ -115,5 +118,3 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
 };
 
 export default ParagraphBox;
-
-    

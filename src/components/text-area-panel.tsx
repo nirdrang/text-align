@@ -38,6 +38,7 @@ interface TextAreaPanelProps {
   // Callback receives the ORIGINAL index and language
   onDropParagraph: (originalIndex: number, language: 'english' | 'hebrew') => void;
   hiddenIndices: Set<number>; // Set of ORIGINAL hidden indices
+  panelRef: React.RefObject<HTMLDivElement>; // Add ref prop
 
   // Optional props for controls (passed to Hebrew panel)
   showControls?: boolean;
@@ -68,6 +69,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   language, // Use this prop
   onDropParagraph, // Use this prop
   hiddenIndices, // Use this prop
+  panelRef, // Use this ref
   showControls = false,
   onLink,
   onUnlink,
@@ -143,8 +145,9 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
             )}
         </CardHeader>
         <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
-            <ScrollArea className="flex-grow px-4 pb-4">
-            <div className="space-y-2 outline-none" tabIndex={0}>
+            {/* The ref is passed to the ScrollArea, which is the container for scrolling */}
+            <ScrollArea className="flex-grow px-4 pb-4" ref={panelRef as React.RefObject<any> /* Type assertion needed as ScrollArea ref type might be complex */}>
+                <div className="space-y-2 outline-none" tabIndex={0}>
                 {isLoading ? (
                 <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
                     <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -216,6 +219,8 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                             suggestionConfidence={suggestionConfidence}
                             // Pass ORIGINAL index to drop handler
                             onDrop={() => onDropParagraph(originalIndex, language)}
+                            // Add a class for easier selection in IntersectionObserver
+                             className="paragraph-box"
                         />
                     );
                 })
@@ -232,5 +237,3 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 };
 
 export default TextAreaPanel;
-
-    
