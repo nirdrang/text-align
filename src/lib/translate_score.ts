@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { pipeline, cos_sim } from "@xenova/transformers/node";
+import { pipeline, cos_sim } from "@xenova/transformers";
 import * as unic from "unorm";
 
 // Ensure OPENAI_API_KEY is set in your environment variables
@@ -21,7 +21,7 @@ async function translateToHebrew(text: string): Promise<string> {
  console.log(`[OpenAI] Preparing to translate text: "${text.substring(0, 50)}..."`); // Log before call
  try {
   const chat = await openai.chat.completions.create({
-  model: "gpt-4o-mini", // or gpt‑3.5‑turbo
+  model: "gpt-4.1-nano", // or gpt‑3.5‑turbo
   temperature: 0,
   messages: [
   {
@@ -133,6 +133,7 @@ export async function scorePair(pair: Pair): Promise<Omit<Scored, 'en' | 'he'>> 
 // --- helper -----------------------------------------------------------
 // Basic normalization, align with the normalization used in page.tsx if needed
 function normalise(t: string) {
+  // @ts-ignore
  return unic.normalize(t, 'NFC') // Canonical composition
   .replace(/[\u0591-\u05C7]/g, '') // Remove Hebrew diacritics (nikkud, ta'amim) - adjust if needed
   .replace(/[.,;:!?()"'\-\u05BE]/g, '') // Remove common punctuation, including Hebrew maqaf (־)
