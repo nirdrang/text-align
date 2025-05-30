@@ -3,7 +3,7 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Trash2, Merge } from 'lucide-react'; // Removed RefreshCw, AlertTriangle, Loader2
+import { Trash2, Merge, Scissors, Pencil } from 'lucide-react'; // Removed RefreshCw, AlertTriangle, Loader2
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ContextMenu,
@@ -23,6 +23,10 @@ interface ParagraphBoxProps {
     onMergeUp?: (displayedIndex: number) => void;
     onMergeDown?: (displayedIndex: number) => void;
     className?: string;
+    score?: number | null;
+    lenRatio?: number | null;
+    onSplit?: (displayedIndex: number) => void;
+    onEdit?: (displayedIndex: number) => void;
 }
 
 const ParagraphBox: React.FC<ParagraphBoxProps> = ({
@@ -36,8 +40,11 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
     onMergeUp,
     onMergeDown,
     className,
+    score,
+    lenRatio,
+    onSplit,
+    onEdit,
 }) => {
-
     const handleDropClick = (e: React.MouseEvent) => {
         e.stopPropagation();
         onDrop(originalIndex);
@@ -55,6 +62,16 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
          }
      };
 
+    // Compute badge color based on score using linear RGB interpolation
+    let scoreColor = 'rgb(220,38,38)'; // Default to red
+    if (typeof score === 'number') {
+        const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+        const t = clamp(score, 0, 1); // t=0 for score=0, t=1 for score=1
+        const r = Math.round(220 * (1 - t) + 22 * t);
+        const g = Math.round(38 * (1 - t) + 163 * t);
+        const b = Math.round(38 * (1 - t) + 74 * t);
+        scoreColor = `rgb(${r},${g},${b})`;
+    }
 
     const paragraphContent = (
         <div
@@ -77,17 +94,20 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
         >
             {/* Controls Container (top-right or top-left) */}
              <div className={cn(
-                 "absolute top-1 flex items-center space-x-1",
+                 "absolute top-1 flex flex-col items-start space-y-1",
                  isHebrew ? "left-1" : "right-1"
              )}>
-
+                {/* Displayed Index Badge */}
+                <span className="px-2 py-0.5 min-w-[32px] text-center rounded bg-muted text-xs text-muted-foreground border border-border mb-1">
+                  {displayedIndex + 1}
+                </span>
                 {/* Drop Button */}
                  <Tooltip>
                     <TooltipTrigger asChild>
                          <Button
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                            className="h-6 w-6 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity mb-1"
                             onClick={handleDropClick}
                             aria-label="Drop paragraph"
                          >
@@ -98,6 +118,53 @@ const ParagraphBox: React.FC<ParagraphBoxProps> = ({
                         <p>Hide this paragraph</p>
                     </TooltipContent>
                  </Tooltip>
+                 {/* Split Button (Hebrew only) */}
+                 {isHebrew && onSplit && (
+                   <Tooltip>
+                     <TooltipTrigger asChild>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         className="h-6 w-6 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity mb-1"
+                         onClick={e => { e.stopPropagation(); onSplit(displayedIndex); }}
+                         aria-label="Split paragraph"
+                       >
+                         <Scissors className="h-3.5 w-3.5" />
+                       </Button>
+                     </TooltipTrigger>
+                     <TooltipContent side="top">
+                       <p>Split this paragraph</p>
+                     </TooltipContent>
+                   </Tooltip>
+                 )}
+                 {/* Edit Button (all languages) */}
+                 {onEdit && (
+                   <Tooltip>
+                     <TooltipTrigger asChild>
+                       <Button
+                         variant="ghost"
+                         size="icon"
+                         className="h-6 w-6 p-1 text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity mb-1"
+                         onClick={e => { e.stopPropagation(); onEdit(displayedIndex); }}
+                         aria-label="Edit paragraph"
+                       >
+                         <Pencil className="h-3.5 w-3.5" />
+                       </Button>
+                     </TooltipTrigger>
+                     <TooltipContent side="top">
+                       <p>Edit this paragraph</p>
+                     </TooltipContent>
+                   </Tooltip>
+                 )}
+                 {/* Score Badge Only */}
+                 {typeof score === 'number' && (
+                     <span
+                         className="px-2 py-0.5 min-w-[48px] text-center rounded text-white text-xs shadow mb-1"
+                         style={{ backgroundColor: scoreColor }}
+                     >
+                         {score.toFixed(2)}
+                     </span>
+                 )}
              </div>
 
 

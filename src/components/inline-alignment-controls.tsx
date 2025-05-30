@@ -1,4 +1,3 @@
-
 "use client";
 
 import React from 'react';
@@ -9,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 interface InlineAlignmentControlsProps {
   onConfirmPair: () => void;
+  onConfirmAllPairsUpwards?: () => void;
   onUnlink: () => void;
   // Removed onSuggest prop
   canConfirmPair: boolean;
@@ -19,6 +19,7 @@ interface InlineAlignmentControlsProps {
 
 const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
   onConfirmPair,
+  onConfirmAllPairsUpwards,
   onUnlink,
   canConfirmPair,
   canUnlink,
@@ -28,6 +29,29 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
   return (
     <TooltipProvider delayDuration={100}>
         <div className={cn("flex items-center space-x-2", disabled && "opacity-50 cursor-not-allowed")}>
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        onClick={onConfirmAllPairsUpwards}
+                        disabled={!canConfirmPair || disabled || !onConfirmAllPairsUpwards}
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 relative"
+                        aria-label="Confirm all pairs upwards"
+                    >
+                        <Check className="h-4 w-4" />
+                        <span
+                            style={{ position: 'absolute', top: '2px', right: '2px', fontSize: '0.7em', color: '#fbbf24', pointerEvents: 'none' }}
+                            aria-hidden="true"
+                        >
+                            *
+                        </span>
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                    <p>Confirm All Pairs Upwards</p>
+                </TooltipContent>
+            </Tooltip>
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Button

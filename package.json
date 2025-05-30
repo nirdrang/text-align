@@ -49,6 +49,7 @@
     "lucide-react": "^0.475.0",
     "next": "^15.3.1",
     "openai": "^4.97.0",
+    "papaparse": "^5.5.2",
     "patch-package": "^8.0.0",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
@@ -63,6 +64,7 @@
   "devDependencies": {
     "@types/file-saver": "^2.0.7",
     "@types/node": "^20",
+    "@types/papaparse": "^5.3.16",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "@types/unorm": "^1.3.31",

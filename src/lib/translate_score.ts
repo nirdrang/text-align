@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { pipeline, cos_sim } from "@xenova/transformers";
-import * as unic from "unorm";
+import unorm from "unorm";
 
 // Ensure OPENAI_API_KEY is set in your environment variables
 // Consider adding error handling for missing API key
@@ -11,34 +11,54 @@ export interface Pair {
  he: string;
 }
 export interface Scored extends Pair {
- mt: string; // Machine Translation (Hebrew)
  bleu: number; // BLEU-1 score
  cosine: number; // Cosine similarity score
  blended: number; // Weighted blend of BLEU and Cosine
+ len_ratio: number; // Length ratio between EN and MT-EN
 }
 
-async function translateToHebrew(text: string): Promise<string> {
- console.log(`[OpenAI] Preparing to translate text: "${text.substring(0, 50)}..."`); // Log before call
+// MT translation cache
+const mtCache: Record<string, string> = {};
+
+function hashParagraph(text: string): string {
+  // Simple hash: base64 of UTF-8 bytes
+  return Buffer.from(text, 'utf-8').toString('base64');
+}
+
+async function translateToEnglish(text: string): Promise<string> {
+ console.log(`[OpenAI] Preparing to translate text: "${text.substring(0, 50)}..."`);
  try {
   const chat = await openai.chat.completions.create({
-  model: "gpt-4.1-nano", // or gpt‑3.5‑turbo
-  temperature: 0,
-  messages: [
-  {
-  role: "system",
-  content: "Translate from English to Hebrew. Return ONLY the translation."
-  },
-  { role: "user", content: text }
-  ]
+   model: "gpt-4o-mini",
+   temperature: 0,
+   messages: [
+    {
+     role: "system",
+     content: "Translate from Hebrew to English. Return ONLY the translation."
+    },
+    { role: "user", content: text }
+   ]
   });
   const translation = chat.choices[0].message.content!.trim();
-  console.log(`[OpenAI] Successfully received translation: "${translation.substring(0, 50)}..."`); // Log success
+  console.log(`[OpenAI] Successfully received translation: "${translation.substring(0, 50)}..."`);
   return translation;
  } catch (error) {
-   console.error("[OpenAI] Error translating to Hebrew:", error); // Log error
-   // Decide how to handle OpenAI errors, maybe return an empty string or throw
+   console.error("[OpenAI] Error translating to English:", error);
    return "[Translation Error]";
  }
+}
+
+async function translateToEnglishWithCache(text: string): Promise<string> {
+  const key = hashParagraph(text);
+  if (mtCache[key]) {
+    // Removed cache hit log for less clutter
+    return mtCache[key];
+  }
+  const translation = await translateToEnglish(text);
+  if (translation !== "[Translation Error]") {
+    mtCache[key] = translation;
+  }
+  return translation;
 }
 
 // ---------- BLEU‑1 (quick, sufficient for paragraph matching) ---------
@@ -62,7 +82,7 @@ async function getEmb() {
   // Using quantized model for potentially faster loading/inference
   embedder = await pipeline(
   "feature-extraction",
-  "sentence-transformers/distiluse-base-multilingual-cased-v2",
+  "Xenova/distiluse-base-multilingual-cased-v2",
   { quantized: true }
   );
   console.log("Sentence transformer model loaded.");
@@ -93,40 +113,61 @@ async function cosine(a: string, b: string): Promise<number> {
  }
 }
 
-// ---------- main scorer -----------------------------------------------
-export async function scorePair(pair: Pair): Promise<Omit<Scored, 'en' | 'he'>> {
- const { en, he } = pair;
- console.log(`[ScorePair] Scoring pair: EN="${en.substring(0, 50)}...", HE="${he.substring(0, 50)}..."`);
- console.log(`[ScorePair] Calling OpenAI for translation...`);
- const mt = await translateToHebrew(en);
+/**
+ * Tiny, language-agnostic tokenizer for length-ratio.
+ * Splits on whitespace _and_ separates leading / trailing punctuation
+ * so "word." ➜ ["word", "."]
+ */
+function lengthRatio(en: string, mt_en: string): number {
+  const toTokens = (s: string) =>
+    s
+      // normalise whitespace
+      .replace(/\s+/g, " ")
+      // isolate most ASCII punctuation
+      .replace(/([.!?;,:'"()\[\]{}<>«»„"”])/g, " $1 ")
+      .trim()
+      .split(/\s+/)                               // final split
+      .filter(Boolean);
 
- if (mt === "[Translation Error]") {
-    console.warn("[ScorePair] Skipping scoring due to translation error.");
-    // Return default scores indicating failure
-    return { mt, bleu: 0, cosine: 0, blended: 0 };
+  const t1 = toTokens(en);
+  const t2 = toTokens(mt_en);
+
+  if (t1.length === 0 || t2.length === 0) return 0.0;
+  return Math.min(t1.length, t2.length) / Math.max(t1.length, t2.length);
+}
+
+// ---------- main scorer -----------------------------------------------
+export async function scorePair(pair: Pair, heIndex?: number, enIndex?: number): Promise<Omit<Scored, 'en' | 'he'>> {
+ const { en, he } = pair;
+ console.log(`[ScorePair] Scoring pair: HE idx=${heIndex ?? 'N/A'}, EN idx=${enIndex ?? 'N/A'}`);
+ const mt_en = await translateToEnglishWithCache(he);
+
+ if (mt_en === "[Translation Error]") {
+   console.warn("[ScorePair] Skipping scoring due to translation error.");
+   return { bleu: 0, cosine: 0, blended: 0, len_ratio: 0 };
  }
 
- console.log(`[ScorePair] Normalizing texts for BLEU...`);
- const normalizedHe = normalise(he);
- const normalizedMt = normalise(mt);
+ const bleu = bleu1(en, mt_en);
+ const cos = await cosine(en, mt_en);
+ const lr = lengthRatio(en, mt_en);
+ const base = 0.6 * bleu + 0.4 * cos;
+ const final = base * Math.pow(lr, 2);
 
- console.log(`[ScorePair] Calculating BLEU score...`);
- const bleu = bleu1(normalizedHe, normalizedMt);
- console.log(`[ScorePair] BLEU score: ${bleu}`);
-
- console.log(`[ScorePair] Calculating Cosine similarity...`);
- const cos = await cosine(he, mt); // Use original Hebrew and MT for cosine semantic comparison.
- console.log(`[ScorePair] Cosine score: ${cos}`);
-
- // Tune weights if you like, ensuring they sum to 1 if desired
- const blended = 0.6 * bleu + 0.4 * cos;
- console.log(`[ScorePair] Blended score: ${blended}`);
+ // Verbose debug logs
+ console.log(`[ScorePair] EN: "${en.substring(0, 120)}..."`);
+ console.log(`[ScorePair] HE: "${he.substring(0, 120)}..."`);
+ console.log(`[ScorePair] MT: "${mt_en.substring(0, 120)}..."`);
+ console.log(`[ScorePair] BLEU: ${bleu}`);
+ console.log(`[ScorePair] Cosine: ${cos}`);
+ console.log(`[ScorePair] LenRatio: ${lr}`);
+ console.log(`[ScorePair] Base: ${base}`);
+ console.log(`[ScorePair] Final: ${final}`);
 
  return {
-  mt,
-  bleu: parseFloat(bleu.toFixed(3)), // Keep precision reasonable
-  cosine: parseFloat(cos.toFixed(3)),
-  blended: parseFloat(blended.toFixed(3))
+   bleu: round4(bleu),
+   cosine: round4(cos),
+   len_ratio: round4(lr),
+   blended: round4(final),
  };
 }
 
@@ -134,12 +175,16 @@ export async function scorePair(pair: Pair): Promise<Omit<Scored, 'en' | 'he'>> 
 // Basic normalization, align with the normalization used in page.tsx if needed
 function normalise(t: string) {
   // @ts-ignore
- return unic.normalize(t, 'NFC') // Canonical composition
+ return unorm.nfc(t)
   .replace(/[\u0591-\u05C7]/g, '') // Remove Hebrew diacritics (nikkud, ta'amim) - adjust if needed
   .replace(/[.,;:!?()"'\-\u05BE]/g, '') // Remove common punctuation, including Hebrew maqaf (־)
   .replace(/\s+/g, ' ') // Collapse whitespace
   .toLowerCase() // Convert to lowercase
   .trim();
+}
+
+function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
 }
 
 // Example of scoring multiple pairs if needed later

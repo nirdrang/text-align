@@ -5,17 +5,17 @@ export const runtime = 'nodejs'; // Use Node.js runtime for transformers.js
 
 export async function POST(req: NextRequest) {
   try {
-    const { en, he } = await req.json();
+    const { en, he, enIndex, heIndex } = await req.json();
 
     if (typeof en !== 'string' || typeof he !== 'string') {
       return NextResponse.json({ error: 'Both en (English) and he (Hebrew) parameters are required and must be strings.' }, { status: 400 });
     }
 
-    console.log(`API received request to score: EN="${en.substring(0, 50)}...", HE="${he.substring(0, 50)}..."`);
+    console.log(`API received request to score: EN="${en.substring(0, 50)}...", HE="${he.substring(0, 50)}...", EN idx=${enIndex}, HE idx=${heIndex}`);
 
     // Call the scoring function
     // Make sure OPENAI_API_KEY is available in the environment where this serverless function runs
-    const scores = await scorePair({ en, he });
+    const scores = await scorePair({ en, he }, heIndex, enIndex);
 
     console.log(`API successfully scored pair. Blended score: ${scores.blended}`);
 

@@ -173,18 +173,15 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
             .replace(/\n{3,}/g, '\n\n') // Max 2 consecutive newlines (from BRs)
             .trim(); // Trim leading/trailing whitespace
 
-        // Add to paragraphs list if it has substantial content
-        // Increased min length slightly to avoid very short/fragmented blocks
-        if (blockText.length > 15) {
-             // Avoid adding exact duplicates
+        // Add to paragraphs list: include ALL paragraphs, regardless of length or tag
+        if (blockText.length > 0) {
+            // Avoid adding exact duplicates
             if (!paragraphs.includes(blockText)) {
                 console.log(`${logPrefix} Adding paragraph ${paragraphs.length} (from block ${i}, ${elementType}). Length: ${blockText.length}. Content: "${blockText.substring(0, 70)}..."`);
                 paragraphs.push(blockText);
             } else {
-                 console.log(`${logPrefix} Skipping duplicate paragraph from block ${i} (${elementType}).`);
+                console.log(`${logPrefix} Skipping duplicate paragraph from block ${i} (${elementType}).`);
             }
-        } else if (blockText.length > 0) {
-             console.log(`${logPrefix} Skipping short paragraph block ${i} (${elementType}). Length: ${blockText.length}. Content: "${blockText}"`);
         }
     });
 
