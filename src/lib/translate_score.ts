@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { pipeline, cos_sim } from "@xenova/transformers";
 import unorm from "unorm";
-import { LectureJsonlCache } from "./lecture_cache";
 
 // Ensure OPENAI_API_KEY is set in your environment variables
 // Consider adding error handling for missing API key
