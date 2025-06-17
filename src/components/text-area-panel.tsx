@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -10,6 +10,7 @@ import InlineAlignmentControls from './inline-alignment-controls';
 import ParagraphBox from './paragraph-box';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { splitSentences } from '@/lib/sentence_utils';
 
 // Interface for displayed paragraphs - Adjusted to match page.tsx
 interface DisplayedParagraphData {
@@ -46,6 +47,9 @@ interface TextAreaPanelProps {
   onMergeDown?: (displayedIndex: number) => void;
   onSplitParagraph?: (displayedIndex: number, paragraph: string) => void;
   onEditParagraph?: (displayedIndex: number, paragraph: string) => void;
+  onRevertLastPair?: () => void;
+  canRevertLastPair?: boolean;
+  highlightMap?: { [paragraphIdx: number]: { green?: number; red?: number; greenOnly?: boolean } };
 }
 
 const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
@@ -73,6 +77,9 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
   onMergeDown,
   onSplitParagraph,
   onEditParagraph,
+  onRevertLastPair,
+  canRevertLastPair = false,
+  highlightMap,
 }) => {
 
     const hasAttemptedLoad = loadedText !== null;
@@ -83,15 +90,67 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
     const [splitDialogOpen, setSplitDialogOpen] = React.useState(false);
     const [splitParagraphIndex, setSplitParagraphIndex] = React.useState<number | null>(null);
     const [splitParagraphText, setSplitParagraphText] = React.useState('');
+    const [splitHighlightInfo, setSplitHighlightInfo] = React.useState<{ green?: number; red?: number; greenOnly?: boolean }>();
 
     // Edit dialog state
     const [editDialogOpen, setEditDialogOpen] = React.useState(false);
     const [editParagraphIndex, setEditParagraphIndex] = React.useState<number | null>(null);
     const [editParagraphText, setEditParagraphText] = React.useState('');
+    const [editHighlightInfo, setEditHighlightInfo] = React.useState<{ green?: number; red?: number; greenOnly?: boolean }>();
+
+    const splitEditRef = useRef<HTMLDivElement>(null);
+    const editEditRef = useRef<HTMLDivElement>(null);
+
+    // Helper: escape HTML to avoid XSS when inserting user text
+    const escapeHtml = (unsafe: string) => unsafe
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+    // Build highlighted HTML for a paragraph
+    const buildHighlightedHTML = (
+      paragraph: string,
+      isHebrew: boolean,
+      highlightInfo?: { green?: number; red?: number; greenOnly?: boolean }
+    ) => {
+      if (!highlightInfo) return escapeHtml(paragraph);
+      if (highlightInfo.greenOnly) {
+        return `<span style=\"background-color:rgba(0,255,0,0.15);\">${escapeHtml(paragraph)}</span>`;
+      }
+      const sentences = splitSentences(paragraph, isHebrew ? 'hebrew' : 'english');
+      const htmlContent = sentences
+        .map((s, idx) => {
+          const safe = escapeHtml(s);
+          if (highlightInfo.green === idx) return `<span style=\"color:green;font-weight:bold;\">${safe}</span>`;
+          if (highlightInfo.red === idx) return `<span style=\"color:red;font-weight:bold;\">${safe}</span>`;
+          return safe;
+        })
+        .join(' ');
+
+      return htmlContent;
+    };
+
+    // Whenever the dialog opens, inject initial HTML with highlights
+    useEffect(() => {
+      if (splitDialogOpen && splitEditRef.current) {
+        splitEditRef.current.innerHTML = buildHighlightedHTML(splitParagraphText, language === 'hebrew', splitHighlightInfo);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [splitDialogOpen, splitHighlightInfo, language]);
+
+    useEffect(() => {
+      if (editDialogOpen && editEditRef.current) {
+        editEditRef.current.innerHTML = buildHighlightedHTML(editParagraphText, language === 'hebrew', editHighlightInfo);
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editDialogOpen, editHighlightInfo, language]);
 
     const handleSplit = (displayedIndex: number) => {
       setSplitParagraphIndex(displayedIndex);
       setSplitParagraphText(displayedParagraphs[displayedIndex]?.paragraph || '');
+      setSplitHighlightInfo(highlightMap ? highlightMap[displayedIndex] : undefined);
       setSplitDialogOpen(true);
     };
 
@@ -102,17 +161,20 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
       setSplitDialogOpen(false);
       setSplitParagraphIndex(null);
       setSplitParagraphText('');
+      setSplitHighlightInfo(undefined);
     };
 
     const handleSplitCancel = () => {
       setSplitDialogOpen(false);
       setSplitParagraphIndex(null);
       setSplitParagraphText('');
+      setSplitHighlightInfo(undefined);
     };
 
     const handleEdit = (displayedIndex: number) => {
       setEditParagraphIndex(displayedIndex);
       setEditParagraphText(displayedParagraphs[displayedIndex]?.paragraph || '');
+      setEditHighlightInfo(highlightMap ? highlightMap[displayedIndex] : undefined);
       setEditDialogOpen(true);
     };
 
@@ -123,13 +185,24 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
       setEditDialogOpen(false);
       setEditParagraphIndex(null);
       setEditParagraphText('');
+      setEditHighlightInfo(undefined);
     };
 
     const handleEditCancel = () => {
       setEditDialogOpen(false);
       setEditParagraphIndex(null);
       setEditParagraphText('');
+      setEditHighlightInfo(undefined);
     };
+
+    useEffect(() => {
+      if (highlightMap) {
+        // Removed debug log
+      }
+    }, [highlightMap]);
+
+    // Use browser's innerText which preserves \n for block-level breaks
+    const extractText = (el: HTMLElement) => el.innerText.replace(/\r/g, '')
 
     return (
         <TooltipProvider delayDuration={100}>
@@ -165,6 +238,8 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     canConfirmPair={canConfirmPair}
                     canUnlink={canUnlink}
                     disabled={controlsDisabled}
+                    onRevertLastPair={onRevertLastPair}
+                    canRevertLastPair={canRevertLastPair}
                 />
                 )}
             </CardHeader>
@@ -190,7 +265,13 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     displayedParagraphs.map((item, displayedIndex) => {
                         const { paragraph, originalIndex, score, len_ratio } = item;
                         const isSelected = selectedOriginalIndex === originalIndex;
-
+                        let highlightInfo: { green?: number; red?: number; greenOnly?: boolean } | undefined = undefined;
+                        if (highlightMap) {
+                            highlightInfo = highlightMap[displayedIndex];
+                        }
+                        if (highlightInfo) {
+                          // Removed debug log
+                        }
                         return (
                             <ParagraphBox
                                 key={`${language}-${originalIndex}-${paragraph.length}`}
@@ -202,12 +283,13 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                                 onSelect={() => onParagraphSelect(displayedIndex, language)}
                                 onDrop={() => onDropParagraph(originalIndex, language)}
                                 className="paragraph-box"
-                                onMergeUp={language === 'hebrew' ? onMergeUp : undefined}
-                                onMergeDown={language === 'hebrew' ? onMergeDown : undefined}
+                                onMergeUp={onMergeUp}
+                                onMergeDown={onMergeDown}
                                 score={typeof score === 'number' ? score : undefined}
                                 lenRatio={typeof len_ratio === 'number' ? len_ratio : undefined}
                                 onSplit={language === 'hebrew' && onSplitParagraph ? handleSplit : undefined}
                                 onEdit={handleEdit}
+                                highlightInfo={highlightInfo}
                             />
                         );
                     })
@@ -225,12 +307,15 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
                 <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6 w-full max-w-lg">
                   <h2 className="text-lg font-semibold mb-2">Split Paragraph</h2>
-                  <p className="text-sm text-muted-foreground mb-2">Insert a line break (Enter) where you want to split. The text above will become the first paragraph, the text below will become the second.</p>
-                  <textarea
-                    className="w-full min-h-[120px] border rounded p-2 mb-4 text-sm bg-background"
-                    value={splitParagraphText}
-                    onChange={e => setSplitParagraphText(e.target.value)}
-                    autoFocus
+                  {/* Replace preview + textarea with one editable div */}
+                  <div
+                    ref={splitEditRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    dir={language === 'hebrew' ? 'rtl' : 'ltr'}
+                    style={language === 'hebrew' ? { textAlign: 'right' } : { textAlign: 'left' }}
+                    className="w-full min-h-[120px] border rounded p-2 mb-4 text-sm bg-background whitespace-pre-wrap focus:outline-none"
+                    onInput={e => setSplitParagraphText(extractText(e.currentTarget as HTMLElement))}
                   />
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={handleSplitCancel}>Cancel</Button>
@@ -244,11 +329,15 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
                 <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6 w-full max-w-lg">
                   <h2 className="text-lg font-semibold mb-2">Edit Paragraph</h2>
-                  <textarea
-                    className="w-full min-h-[120px] border rounded p-2 mb-4 text-sm bg-background"
-                    value={editParagraphText}
-                    onChange={e => setEditParagraphText(e.target.value)}
-                    autoFocus
+                  {/* For Edit Dialog */}
+                  <div
+                    ref={editEditRef}
+                    contentEditable
+                    suppressContentEditableWarning
+                    dir={language === 'hebrew' ? 'rtl' : 'ltr'}
+                    style={language === 'hebrew' ? { textAlign: 'right' } : { textAlign: 'left' }}
+                    className="w-full min-h-[120px] border rounded p-2 mb-4 text-sm bg-background whitespace-pre-wrap focus:outline-none"
+                    onInput={e => setEditParagraphText(extractText(e.currentTarget as HTMLElement))}
                   />
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" size="sm" onClick={handleEditCancel}>Cancel</Button>

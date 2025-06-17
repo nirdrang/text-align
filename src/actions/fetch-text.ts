@@ -121,7 +121,7 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
 
     // --- Enhanced Paragraph Extraction ---
     const paragraphs: string[] = [];
-    const blockLevelTags = 'p, div, blockquote, li, h1, h2, h3, h4, h5, h6, article, section, td, pre'; // Common block-level tags
+    const blockLevelTags = 'p, div, blockquote, li, h1, h2, h3, h4, h5, h6, article, section, td, pre, center'; // Common block-level tags
 
     // Iterate through potential block-level elements within the main content
     mainContent.find(blockLevelTags).each((i, el) => {
@@ -177,7 +177,6 @@ export async function fetchTextFromUrl(url: string): Promise<FetchResult> {
         if (blockText.length > 0) {
             // Avoid adding exact duplicates
             if (!paragraphs.includes(blockText)) {
-                console.log(`${logPrefix} Adding paragraph ${paragraphs.length} (from block ${i}, ${elementType}). Length: ${blockText.length}. Content: "${blockText.substring(0, 70)}..."`);
                 paragraphs.push(blockText);
             } else {
                 console.log(`${logPrefix} Skipping duplicate paragraph from block ${i} (${elementType}).`);

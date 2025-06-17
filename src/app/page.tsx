@@ -25,6 +25,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import InlineAlignmentControls from '@/components/inline-alignment-controls';
 import { parseCsvFile } from '@/lib/utils';
+import { splitSentences, bleu1 } from '@/lib/sentence_utils';
+import { translateHebrewToEnglish } from '@/lib/client-translate';
+import { parseParagraphs } from '@/lib/paragraph_utils';
+import { fetchTextFromUrl } from '@/actions/fetch-text';
 
 
 // Throttling function
@@ -114,41 +118,34 @@ function normalizeHebrewPunctuation(text: string, keep_nikud: boolean = true): s
  interface DisplayedParagraphData {
     paragraph: string;
     originalIndex: number;
+    anchorIndex?: number;
     score?: number | null; // Optional score
     scoreLoading?: boolean;
     len_ratio?: number;
  }
 
- function parseParagraphs(text: string | null, language: 'english' | 'hebrew'): string[] {
-     if (!text) return [];
-     return text.split(/(?:\s*\n\s*){2,}/)
-         .map(paragraph => paragraph.trim())
-         .filter(paragraph => paragraph !== '')
-         .map((paragraph, index) => {
-              const originalParagraph = paragraph;
-              let normalizedParagraph: string;
-
-              if (language === 'hebrew') {
-                 normalizedParagraph = normalizeHebrewPunctuation(originalParagraph, true);
-                 // Removed console logs related to normalization
-              } else {
-                 // English text is not normalized
-                 normalizedParagraph = originalParagraph;
-              }
-              return normalizedParagraph;
-         });
- }
-
-
- function assignOriginalIndices(paragraphs: string[]): { paragraph: string; originalIndex: number }[] {
-     return paragraphs.map((paragraph, index) => ({ paragraph, originalIndex: index }));
-
+ function assignOriginalIndices(paragraphs: string[]): { paragraph: string; originalIndex: number; anchorIndex: number }[] {
+     return paragraphs.map((paragraph, index) => ({ paragraph, originalIndex: index, anchorIndex: index }));
  }
 
  function filterMetadata(paragraphsWithIndices: { paragraph: string; originalIndex: number }[], hiddenIndices: Set<number>): { paragraph: string; originalIndex: number }[] {
      return paragraphsWithIndices.filter(item => !hiddenIndices.has(item.originalIndex));
  }
 
+// Add this utility function near the top-level of the file (outside the component):
+function adjustHighlightMapAfterRemoval(map: Record<number, any>, removedIdx: number): Record<number, any> {
+  const newMap: Record<number, any> = {};
+  Object.entries(map).forEach(([key, value]) => {
+    const idx = Number(key);
+    if (idx < removedIdx) {
+      newMap[idx] = value;
+    } else if (idx > removedIdx) {
+      newMap[idx - 1] = value;
+    }
+    // else: skip the removed index
+  });
+  return newMap;
+}
 
 export default function Home() {
     // Always call all hooks first!
@@ -164,11 +161,11 @@ export default function Home() {
     const debouncedHebrewUrl = useDebounce(hebrewUrl, 500);
     const [processedParagraphs, setProcessedParagraphs] = useState<{
        english: {
-           original: { paragraph: string; originalIndex: number }[];
+           original: { paragraph: string; originalIndex: number; anchorIndex: number }[];
            displayed: DisplayedParagraphData[];
        };
        hebrew: {
-           original: { paragraph: string; originalIndex: number }[];
+           original: { paragraph: string; originalIndex: number; anchorIndex: number }[];
            displayed: DisplayedParagraphData[];
        };
    }>({
@@ -233,6 +230,20 @@ export default function Home() {
     // Add state to track if JSONL file exists in folder
     const [jsonlFileExists, setJsonlFileExists] = useState(false);
 
+    // Add state for skip-to-lecture input
+    const [skipHebrewLecture, setSkipHebrewLecture] = useState('');
+
+    // Add state for toggling the secondary (non-scoring) controls pane
+    const [showControlsPane, setShowControlsPane] = useState(true);
+
+    // Add state for dump range selection
+    const [dumpStartIdx, setDumpStartIdx] = useState(hebrewLectureIdx + 1); // 1-based
+    const [dumpEndIdx, setDumpEndIdx] = useState(hebrewLectureIdx + 1); // 1-based
+
+    // Add state for Hebrew search window
+    const [hebrewSearchBefore, setHebrewSearchBefore] = useState(2);
+    const [hebrewSearchAfter, setHebrewSearchAfter] = useState(3);
+
     // Utility to check if JSONL file exists in folder
     async function checkJsonlFileExists(folderHandle: any, url: string) {
         if (!folderHandle || !url) {
@@ -271,6 +282,25 @@ export default function Home() {
             });
            return;
        }
+        // Populate cache on the server before fetching texts
+        const populateCacheParams = { lectureIdx: hebrewLectureIdx };
+        console.log('[Client] Calling /api/populate_cache with:', populateCacheParams);
+        try {
+            const res = await fetch('/api/populate_cache', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(populateCacheParams),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast({ title: 'Cache Populated', description: `Lecture ${hebrewLectureIdx + 1} cache: ${data.count} records.`, duration: 2000 });
+            } else {
+                toast({ title: 'Cache Error', description: data.error || 'Failed to populate cache.', variant: 'destructive', duration: 2000 });
+            }
+        } catch (error: any) {
+            toast({ title: 'Cache Error', description: error.message || 'Failed to populate cache.', variant: 'destructive', duration: 2000 });
+        }
+
         setIsFetching(true);
         setEnglishText(null);
         setHebrewText(null);
@@ -295,9 +325,10 @@ export default function Home() {
             const hebrewParagraphsWithIndices = assignOriginalIndices(hebrewParagraphs);
 
             // No filtering of short paragraphs or metadata
-            const mapToDisplayedData = (item: { paragraph: string; originalIndex: number }): DisplayedParagraphData => ({
+            const mapToDisplayedData = (item: { paragraph: string; originalIndex: number; anchorIndex: number }): DisplayedParagraphData & { anchorIndex: number } => ({
                 paragraph: item.paragraph,
                 originalIndex: item.originalIndex,
+                anchorIndex: item.anchorIndex,
                 score: null, // Initialize score to null
                 scoreLoading: false, // Initialize loading state
             });
@@ -335,7 +366,7 @@ export default function Home() {
             setIsFetching(false);
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [computedEnglishUrl, computedHebrewUrl, setHiddenIndices, toast]);
+    }, [computedEnglishUrl, computedHebrewUrl, setHiddenIndices, toast, hebrewLectureIdx]);
 
     useEffect(() => {
         if (debouncedEnglishUrl && debouncedHebrewUrl && (debouncedEnglishUrl !== englishUrl || debouncedHebrewUrl !== hebrewUrl)) {
@@ -399,6 +430,7 @@ export default function Home() {
                const enText = englishParaData.paragraph;
                const heText = hebrewParaData.paragraph;
                const record = {
+                   anchor_id: englishParaData.anchorIndex,
                    messages: [
                        { role: 'system', content: 'Translate Rudolf Steiner lecture paragraphs from English to Hebrew.' },
                        { role: 'user', content: enText },
@@ -406,15 +438,15 @@ export default function Home() {
                    ]
                };
                setJsonlRecords(prevRecords => [...prevRecords, JSON.stringify(record)]);
-               // Remove the confirmed pair from displayed arrays and reset indices
+               // Remove the confirmed pair from displayed arrays, preserve anchorIndex
                setProcessedParagraphs(prev => ({
                    english: {
                        original: prev.english.original,
-                       displayed: prev.english.displayed.filter((_, idx) => idx !== displayedIndex).map((p, i) => ({ ...p, originalIndex: i })),
+                       displayed: prev.english.displayed.filter((_, idx) => idx !== displayedIndex),
                    },
                    hebrew: {
                        original: prev.hebrew.original,
-                       displayed: prev.hebrew.displayed.filter((_, idx) => idx !== displayedIndex).map((p, i) => ({ ...p, originalIndex: i })),
+                       displayed: prev.hebrew.displayed.filter((_, idx) => idx !== displayedIndex),
                    },
                }));
                setSelectedEnglishIndex(null);
@@ -427,6 +459,8 @@ export default function Home() {
                    description: `Paragraph pair removed from display and added to export list.`,
                    duration: 2000,
                });
+               setHighlightMap(prev => adjustHighlightMapAfterRemoval(prev, displayedIndex));
+               setEnglishHighlightMap(prev => adjustHighlightMapAfterRemoval(prev, displayedIndex));
            } else {
                toast({
                    title: "Confirmation Error",
@@ -632,11 +666,117 @@ export default function Home() {
        }
    };
 
+   // --- Sentence Matching and Highlighting State ---
+   const [highlightMap, setHighlightMap] = useState<{
+     [hebrewParagraphIdx: number]: { green?: number; red?: number }
+   }>({});
+   const [englishHighlightMap, setEnglishHighlightMap] = useState<{
+     [englishParagraphIdx: number]: { green?: number; red?: number; greenOnly?: boolean }
+   }>({});
+   const [isMatchingSentences, setIsMatchingSentences] = useState(false);
+
+   const handleFindSentenceMatches = async () => {
+     setIsMatchingSentences(true);
+     setHighlightMap({});
+     setEnglishHighlightMap({});
+     const SEARCH_WINDOW = { before: hebrewSearchBefore, after: hebrewSearchAfter };
+     const englishDisplayed = processedParagraphs.english.displayed;
+     const hebrewDisplayed = processedParagraphs.hebrew.displayed;
+     const englishSentencesByParagraph = englishDisplayed.map(p => splitSentences(p.paragraph, 'english'));
+
+     // Use the same range as scoring
+     let matchStart = 0;
+     let matchEnd = Math.min(englishDisplayed.length - 1, processedParagraphs.english.displayed.length - 1);
+     if (scoreStart) {
+       matchStart = Math.max(0, parseInt(scoreStart, 10) - 1);
+     }
+     if (scoreEnd) {
+       matchEnd = Math.min(englishDisplayed.length - 1, parseInt(scoreEnd, 10) - 1);
+     }
+
+     for (let engIdx = matchStart; engIdx <= matchEnd; engIdx++) {
+       if (!englishDisplayed[engIdx]) continue;
+       const sentences = englishSentencesByParagraph[engIdx];
+       console.log(`[DEBUG] English paragraph ${engIdx} sentences:`, sentences);
+       // Progressive update for English highlight map
+       if (sentences.length === 1) {
+         setEnglishHighlightMap(prev => ({ ...prev, [engIdx]: { greenOnly: true } }));
+         continue;
+       } else if (sentences.length >= 2) {
+         setEnglishHighlightMap(prev => ({ ...prev, [engIdx]: { green: 0, red: sentences.length - 1 } }));
+       }
+       if (sentences.length < 2) continue;
+       const firstSentence = sentences[0];
+       const lastSentence = sentences[sentences.length - 1];
+       const engEndSentIdx = sentences.length - 1;
+       let bestGreen = { paraIdx: -1, sentIdx: -1, score: 0 };
+       let bestRed = { paraIdx: -1, sentIdx: -1, score: 0 };
+       const startHebIdx = Math.max(0, engIdx - SEARCH_WINDOW.before);
+       const endHebIdx = Math.min(hebrewDisplayed.length - 1, engIdx + SEARCH_WINDOW.after);
+       for (let hebIdx = startHebIdx; hebIdx <= endHebIdx; hebIdx++) {
+         if (!hebrewDisplayed[hebIdx]) continue;
+         const hebPara = hebrewDisplayed[hebIdx].paragraph;
+         let hebParaEnglish = '';
+         try {
+           hebParaEnglish = await translateHebrewToEnglish(hebPara);
+           console.log(`[DEBUG] [engIdx ${engIdx}] Translated Hebrew paragraph at hebIdx ${hebIdx}:`, hebParaEnglish);
+         } catch (err) {
+           hebParaEnglish = '';
+           console.log(`[DEBUG] [engIdx ${engIdx}] Error translating Hebrew paragraph at hebIdx ${hebIdx}`);
+         }
+         const hebSentencesEnglish = splitSentences(hebParaEnglish, 'english');
+         const hebSentencesHebrew = splitSentences(hebPara, 'hebrew');
+         console.log(`[DEBUG] [engIdx ${engIdx}] Hebrew paragraph ${hebIdx} split into sentences (EN):`, hebSentencesEnglish);
+         console.log(`[DEBUG] [engIdx ${engIdx}] Hebrew paragraph ${hebIdx} split into sentences (HE):`, hebSentencesHebrew);
+         hebSentencesEnglish.forEach((heSent, sIdx) => {
+           const greenScore = bleu1(firstSentence, heSent);
+           const redScore = bleu1(lastSentence, heSent);
+           // Separate logs for start (green) and end (red) matching
+           // For start match, English sentence index is 0
+           console.log(`[DEBUG][START MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx 0][hebSentIdx ${sIdx}] greenScore =`, greenScore, '| current max =', bestGreen.score, '\n  firstSentence:', firstSentence, '\n  heSent:', heSent);
+           if (greenScore > bestGreen.score) {
+             bestGreen = { paraIdx: hebIdx, sentIdx: sIdx, score: greenScore };
+             console.log(`[DEBUG][START MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx 0][hebSentIdx ${sIdx}] New best green: score ${greenScore}`);
+           }
+           // For end match, English sentence index is engEndSentIdx
+           console.log(`[DEBUG][END MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx ${engEndSentIdx}][hebSentIdx ${sIdx}] redScore =`, redScore, '| current max =', bestRed.score, '\n  lastSentence:', lastSentence, '\n  heSent:', heSent);
+           if (redScore > bestRed.score) {
+             bestRed = { paraIdx: hebIdx, sentIdx: sIdx, score: redScore };
+             console.log(`[DEBUG][END MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx ${engEndSentIdx}][hebSentIdx ${sIdx}] New best red: score ${redScore}`);
+           }
+         });
+       }
+       if (bestGreen.paraIdx !== -1) {
+         setHighlightMap(prev => ({
+           ...prev,
+           [bestGreen.paraIdx]: {
+             ...(prev[bestGreen.paraIdx] || {}),
+             green: bestGreen.sentIdx
+           }
+         }));
+         console.log(`[engIdx ${engIdx}] Highlight green: hebIdx ${bestGreen.paraIdx}, sentIdx ${bestGreen.sentIdx}`);
+       }
+       if (bestRed.paraIdx !== -1) {
+         setHighlightMap(prev => ({
+           ...prev,
+           [bestRed.paraIdx]: {
+             ...(prev[bestRed.paraIdx] || {}),
+             red: bestRed.sentIdx
+           }
+         }));
+         console.log(`[engIdx ${engIdx}] Highlight red: hebIdx ${bestRed.paraIdx}, sentIdx ${bestRed.sentIdx}`);
+       }
+       // Yield to browser for progressive rendering
+       await new Promise(res => setTimeout(res, 0));
+     }
+     setIsMatchingSentences(false);
+     console.log(`[Sentence Matching Complete] Highlights for English paragraphs in selected range.`);
+     toast({ title: "Sentence Matching Complete", description: `Highlights for English paragraphs in selected range.`, duration: 2000 });
+   };
+
    const handleStartFresh = async () => {
        localStorage.removeItem('jsonlRecords');
        setJsonlRecords([]);
-       // Remove the JSONL file deletion logic here. Do not delete the file automatically.
-       // Reset selection and controls, but keep loaded texts and their hidden indices
        setSelectedEnglishIndex(null);
        setSelectedHebrewIndex(null);
        setCanConfirmPair(false);
@@ -645,7 +785,6 @@ export default function Home() {
 
        // Re-apply initial metadata filtering if texts are loaded
        if (textsAreLoaded) {
-           // Remove short paragraph hiding logic
            setHiddenIndices({ english: new Set<number>(), hebrew: new Set<number>() });
            setProcessedParagraphs(prev => ({
                english: {
@@ -658,125 +797,9 @@ export default function Home() {
                },
            }));
        }
-
+       // Do NOT run sentence matching here
        toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs.", duration: 2000 });
    };
-
-
-   // --- SCORING FUNCTIONALITY ---
-
-   const handleCalculateSingleScore = useCallback(async (displayedIndex: number) => {
-      const hebrewParaData = processedParagraphs.hebrew.displayed[displayedIndex];
-      const englishParaData = processedParagraphs.english.displayed[displayedIndex]; // Assuming 1-to-1 index correspondence after filtering
-
-      if (!hebrewParaData || !englishParaData) {
-           console.warn(`[Score] Cannot score index ${displayedIndex}: Paragraph data missing.`);
-           return;
-      }
-
-      setProcessedParagraphs(prev => ({
-          ...prev,
-          hebrew: {
-              ...prev.hebrew,
-               displayed: prev.hebrew.displayed.map((p, idx) =>
-                  idx === displayedIndex ? { ...p, scoreLoading: true, score: null } : p
-              ),
-           },
-      }));
-
-      try {
-          const logIndex = displayedIndex + 1;
-          console.log(`[Score,${logIndex}] Requesting score: EN="${englishParaData.paragraph.substring(0, 50)}...", HE="${hebrewParaData.paragraph.substring(0, 50)}..."`);
-          const response = await fetch('/api/score', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ en: englishParaData.paragraph, he: hebrewParaData.paragraph }),
-          });
-
-          if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-          }
-
-          const scoreResult = await response.json();
-          console.log(`[Score,${logIndex}] Received score:`, scoreResult);
-
-          setProcessedParagraphs(prev => ({
-              ...prev,
-              hebrew: {
-                  ...prev.hebrew,
-                   displayed: prev.hebrew.displayed.map((p, idx) =>
-                       idx === displayedIndex ? { ...p, score: scoreResult.blended, len_ratio: scoreResult.len_ratio, scoreLoading: false } : p
-                  ),
-               },
-          }));
-      } catch (error: any) {
-           console.error(`[Score] Error scoring index ${displayedIndex}:`, error);
-           toast({
-               title: `Score Error (Para ${displayedIndex + 1})`,
-               description: error.message || "Failed to calculate score.",
-               variant: "destructive",
-               duration: 2000,
-           });
-           setProcessedParagraphs(prev => ({
-               ...prev,
-              hebrew: {
-                  ...prev.hebrew,
-                   displayed: prev.hebrew.displayed.map((p, idx) =>
-                       idx === displayedIndex ? { ...p, scoreLoading: false, score: null } : p // Reset loading, keep score null
-                  ),
-               },
-           }));
-      }
-   }, [processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed, toast]);
-
-   const handleCalculateAllScores = useCallback(async () => {
-      if (!textsAreLoaded || isScoring) {
-          return;
-      }
-      setIsScoring(true);
-      toast({ title: "Calculating Scores...", description: "Please wait.", duration: 5000 }); // Longer duration while scoring
-
-      // Set loading state for all Hebrew paragraphs
-      setProcessedParagraphs(prev => ({
-          ...prev,
-          hebrew: {
-             ...prev.hebrew,
-              displayed: prev.hebrew.displayed.map(p => ({ ...p, scoreLoading: true, score: null })),
-          },
-      }));
-
-     const scorePromises = processedParagraphs.hebrew.displayed.map((_, index) =>
-          handleCalculateSingleScore(index)
-     );
-
-     try {
-         await Promise.all(scorePromises);
-         toast({ title: "Scoring Complete", description: "Scores have been updated.", duration: 2000 });
-      } catch (error) {
-         // Errors are handled within handleCalculateSingleScore, but we catch here just in case
-         console.error("[Score] Error during bulk score calculation:", error);
-          toast({ title: "Scoring Failed", description: "Some scores could not be calculated.", variant: "destructive", duration: 2000 });
-      } finally {
-          setIsScoring(false);
-      }
-
-  }, [textsAreLoaded, isScoring, processedParagraphs.hebrew.displayed, handleCalculateSingleScore, toast]);
-
-  const handleScoreRange = async () => {
-      if (!scoreStart) return;
-      const start = Math.max(0, parseInt(scoreStart, 10) - 1);
-      const end = scoreEnd ? Math.min(processedParagraphs.hebrew.displayed.length - 1, parseInt(scoreEnd, 10) - 1) : processedParagraphs.hebrew.displayed.length - 1;
-      setIsScoring(true);
-      for (let i = start; i <= end; i++) {
-          await handleCalculateSingleScore(i);
-      }
-      setIsScoring(false);
-      toast({ title: "Scoring Complete", description: `Scored paragraphs ${start + 1}${end > start ? `-${end + 1}` : ''}.`, duration: 2000 });
-  };
-
-  // --- END SCORING FUNCTIONALITY ---
-
 
   // Scroll synchronization logic (remains largely the same)
   useEffect(() => {
@@ -905,6 +928,7 @@ const handleConfirmAllPairsUpwards = () => {
         const enPara = processedParagraphs.english.displayed[i];
         if (!hePara || !enPara) continue;
         const record = {
+            anchor_id: enPara.anchorIndex,
             messages: [
                 { role: 'system', content: 'Translate Rudolf Steiner lecture paragraphs from English to Hebrew.' },
                 { role: 'user', content: enPara.paragraph },
@@ -914,15 +938,15 @@ const handleConfirmAllPairsUpwards = () => {
         newJsonlRecords.push(JSON.stringify(record));
     }
     setJsonlRecords(newJsonlRecords);
-    // Remove confirmed pairs from displayed arrays and reset indices
+    // Remove confirmed pairs from displayed arrays, preserve anchorIndex
     setProcessedParagraphs(prev => ({
         english: {
             original: prev.english.original,
-            displayed: prev.english.displayed.slice(selectedHebrewDisplayedIndex + 1).map((p, i) => ({ ...p, originalIndex: i })),
+            displayed: prev.english.displayed.slice(selectedHebrewDisplayedIndex + 1),
         },
         hebrew: {
             original: prev.hebrew.original,
-            displayed: prev.hebrew.displayed.slice(selectedHebrewDisplayedIndex + 1).map((p, i) => ({ ...p, originalIndex: i })),
+            displayed: prev.hebrew.displayed.slice(selectedHebrewDisplayedIndex + 1),
         },
     }));
     setSelectedEnglishIndex(null);
@@ -1019,7 +1043,13 @@ useEffect(() => {
     const hebrew = hebrewLectures[hebrewLectureIdx];
     if (!hebrew) return;
     const date = hebrew['Date'];
-    const candidates = englishLectures.filter(e => e['Date'] === date);
+    let candidates = englishLectures.filter(e => e['Date'] === date);
+    // If multiple English lectures for the same date, prefer GA match but do NOT discard additional GA matches
+    const hebrewGA = hebrew['GA'];
+    if (candidates.length > 1 && hebrewGA) {
+      const gaMatches = candidates.filter(e => e['GA'] === hebrewGA);
+      if (gaMatches.length > 0) candidates = gaMatches; // keep all matches with same GA
+    }
     setEnglishCandidates(candidates);
     setEnglishCandidateIdx(0);
     // Set URLs in input boxes
@@ -1083,78 +1113,310 @@ const handleEditParagraph = (language: 'english' | 'hebrew') => (displayedIndex:
   });
 };
 
+// Add this function to revert the last confirmed pair
+function handleRevertLastPair() {
+  setJsonlRecords(prevRecords => {
+    if (prevRecords.length === 0) return prevRecords;
+    let enText = '', heText = '', anchor_id = null;
+    const removed = prevRecords[prevRecords.length - 1];
+    try {
+      const obj = JSON.parse(removed);
+      anchor_id = obj.anchor_id;
+      if (obj.messages && obj.messages.length === 3) {
+        enText = obj.messages[1].content;
+        heText = obj.messages[2].content;
+      }
+    } catch {}
+    setProcessedParagraphs(prev => {
+      let englishDisplayed = prev.english.displayed;
+      let hebrewDisplayed = prev.hebrew.displayed;
+      const enExists = englishDisplayed.some(p => p.paragraph === enText);
+      const heExists = hebrewDisplayed.some(p => p.paragraph === heText);
+      if (!enExists && enText) {
+        englishDisplayed = [
+          { paragraph: enText, originalIndex: 0, anchorIndex: anchor_id },
+          ...englishDisplayed
+        ];
+        englishDisplayed = englishDisplayed.map((p, i) => ({ ...p, originalIndex: i }));
+      }
+      if (!heExists && heText) {
+        hebrewDisplayed = [
+          { paragraph: heText, originalIndex: 0, anchorIndex: anchor_id },
+          ...hebrewDisplayed
+        ];
+        hebrewDisplayed = hebrewDisplayed.map((p, i) => ({ ...p, originalIndex: i }));
+      }
+      return {
+        english: {
+          original: prev.english.original,
+          displayed: englishDisplayed,
+        },
+        hebrew: {
+          original: prev.hebrew.original,
+          displayed: hebrewDisplayed,
+        },
+      };
+    });
+    return prevRecords.slice(0, -1);
+  });
+}
+
+// Add merge up/down for English panel
+function handleMergeUpEnglish(displayedIndex: number) {
+  setProcessedParagraphs(prev => {
+    const displayedEnglish = [...prev.english.displayed];
+    if (displayedIndex <= 0) return prev;
+    const targetParagraphData = displayedEnglish[displayedIndex - 1];
+    const sourceParagraphData = displayedEnglish[displayedIndex];
+    const mergedText = `${targetParagraphData.paragraph} ${sourceParagraphData.paragraph}`;
+    const targetOriginalIndex = targetParagraphData.originalIndex;
+    const sourceOriginalIndex = sourceParagraphData.originalIndex;
+    let newDisplayedEnglish = displayedEnglish
+      .map((p, idx) => idx === displayedIndex - 1 ? { ...p, paragraph: mergedText } : p)
+      .filter((_, idx) => idx !== displayedIndex);
+    newDisplayedEnglish = newDisplayedEnglish.map((p, i) => ({ ...p, originalIndex: i }));
+    return {
+      ...prev,
+      english: {
+        ...prev.english,
+        displayed: newDisplayedEnglish,
+      },
+    };
+  });
+}
+
+function handleMergeDownEnglish(displayedIndex: number) {
+  setProcessedParagraphs(prev => {
+    const displayedEnglish = [...prev.english.displayed];
+    if (displayedIndex >= displayedEnglish.length - 1) return prev;
+    const sourceParagraphData = displayedEnglish[displayedIndex];
+    const targetParagraphData = displayedEnglish[displayedIndex + 1];
+    const mergedText = `${sourceParagraphData.paragraph} ${targetParagraphData.paragraph}`;
+    const sourceOriginalIndex = sourceParagraphData.originalIndex;
+    const targetOriginalIndex = targetParagraphData.originalIndex;
+    let newDisplayedEnglish = displayedEnglish
+      .map((p, idx) => idx === displayedIndex ? { ...p, paragraph: mergedText } : p)
+      .filter((_, idx) => idx !== displayedIndex + 1);
+    newDisplayedEnglish = newDisplayedEnglish.map((p, i) => ({ ...p, originalIndex: i }));
+    return {
+      ...prev,
+      english: {
+        ...prev.english,
+        displayed: newDisplayedEnglish,
+      },
+    };
+  });
+}
+
+ // --- SCORING FUNCTIONALITY ---
+ const handleCalculateSingleScore = useCallback(async (displayedIndex: number) => {
+   const hebrewParaData = processedParagraphs.hebrew.displayed[displayedIndex];
+   const englishParaData = processedParagraphs.english.displayed[displayedIndex]; // Assuming 1-to-1 index correspondence after filtering
+
+   if (!hebrewParaData || !englishParaData) {
+     console.warn(`[Score] Cannot score index ${displayedIndex}: Paragraph data missing.`);
+     return;
+   }
+
+   setProcessedParagraphs(prev => ({
+     ...prev,
+     hebrew: {
+       ...prev.hebrew,
+       displayed: prev.hebrew.displayed.map((p, idx) =>
+         idx === displayedIndex ? { ...p, scoreLoading: true, score: null } : p
+       ),
+     },
+   }));
+
+   try {
+     const logIndex = displayedIndex + 1;
+     const response = await fetch('/api/score', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ en: englishParaData.paragraph, he: hebrewParaData.paragraph }),
+     });
+
+     if (!response.ok) {
+       const errorData = await response.json();
+       throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+     }
+
+     const scoreResult = await response.json();
+
+     setProcessedParagraphs(prev => ({
+       ...prev,
+       hebrew: {
+         ...prev.hebrew,
+         displayed: prev.hebrew.displayed.map((p, idx) =>
+           idx === displayedIndex ? { ...p, score: scoreResult.blended, len_ratio: scoreResult.len_ratio, scoreLoading: false } : p
+         ),
+       },
+     }));
+   } catch (error: any) {
+     toast({
+       title: `Score Error (Para ${displayedIndex + 1})`,
+       description: error.message || "Failed to calculate score.",
+       variant: "destructive",
+       duration: 2000,
+     });
+     setProcessedParagraphs(prev => ({
+       ...prev,
+       hebrew: {
+         ...prev.hebrew,
+         displayed: prev.hebrew.displayed.map((p, idx) =>
+           idx === displayedIndex ? { ...p, scoreLoading: false, score: null } : p
+         ),
+       },
+     }));
+   }
+ }, [processedParagraphs.english.displayed, processedParagraphs.hebrew.displayed, toast]);
+
+ const handleCalculateAllScores = useCallback(async () => {
+   if (!textsAreLoaded || isScoring) {
+     return;
+   }
+   setIsScoring(true);
+   toast({ title: "Calculating Scores...", description: "Please wait.", duration: 5000 });
+
+   setProcessedParagraphs(prev => ({
+     ...prev,
+     hebrew: {
+       ...prev.hebrew,
+       displayed: prev.hebrew.displayed.map(p => ({ ...p, scoreLoading: true, score: null })),
+     },
+   }));
+
+   const scorePromises = processedParagraphs.hebrew.displayed.map((_, index) =>
+     handleCalculateSingleScore(index)
+   );
+
+   try {
+     await Promise.all(scorePromises);
+     toast({ title: "Scoring Complete", description: "Scores have been updated.", duration: 2000 });
+   } catch (error) {
+     toast({ title: "Scoring Failed", description: "Some scores could not be calculated.", variant: "destructive", duration: 2000 });
+   } finally {
+     setIsScoring(false);
+   }
+ }, [textsAreLoaded, isScoring, processedParagraphs.hebrew.displayed, handleCalculateSingleScore, toast]);
+
+ const handleScoreRange = async () => {
+   if (!scoreStart) return;
+   const start = Math.max(0, parseInt(scoreStart, 10) - 1);
+   const end = scoreEnd ? Math.min(processedParagraphs.hebrew.displayed.length - 1, parseInt(scoreEnd, 10) - 1) : processedParagraphs.hebrew.displayed.length - 1;
+   setIsScoring(true);
+   for (let i = start; i <= end; i++) {
+     await handleCalculateSingleScore(i);
+   }
+   setIsScoring(false);
+   toast({ title: "Scoring Complete", description: `Scored paragraphs ${start + 1}${end > start ? `-${end + 1}` : ''}.`, duration: 2000 });
+ };
+ // --- END SCORING FUNCTIONALITY ---
+
 // Only block rendering, not hook calls
 if (!isClient) return null;
 
 return (
     <div className="flex flex-col h-screen p-4 bg-background">
-        {/* --- Hebrew/English Lecture Traversal Controls --- */}
-        {showLectureNav ? (
-          <div className="mb-4 flex flex-col gap-2 relative">
-            <button
-              className="absolute top-0 right-0 mt-1 mr-1 px-2 py-1 text-xs bg-muted border rounded hover:bg-muted/70"
-              onClick={() => setShowLectureNav(false)}
-              aria-label="Hide lecture navigation"
-            >
-              Hide ▲
-            </button>
-            <div className="flex items-center gap-2">
-              <Button onClick={handlePrevHebrewLecture} disabled={hebrewLectureIdx === 0}>Prev Hebrew</Button>
-              <span>Hebrew Lecture {hebrewLectureIdx + 1} / {hebrewLectures.length}</span>
-              <Button onClick={handleNextHebrewLecture} disabled={hebrewLectureIdx >= hebrewLectures.length - 1}>Next Hebrew</Button>
-              {hebrewLectures[hebrewLectureIdx] && (
-                <span className="ml-4 text-xs">Date: {hebrewLectures[hebrewLectureIdx]['Date']} | Title: {hebrewLectures[hebrewLectureIdx]['Lecture Title']}</span>
-              )}
-            </div>
-            {/* Display Hebrew and English lecture metadata side by side */}
-            <div className="flex flex-row gap-8 mt-1">
-              {/* Hebrew lecture metadata */}
-              {hebrewLectures[hebrewLectureIdx] && (
-                <div className="text-xs border rounded p-2 bg-muted/30 max-w-2xl">
-                  <div><b>GA:</b> {hebrewLectures[hebrewLectureIdx]['GA']}</div>
-                  <div><b>Date:</b> {hebrewLectures[hebrewLectureIdx]['Date']}</div>
-                  <div><b>URL:</b> <a href={hebrewLectures[hebrewLectureIdx]['URL']} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">{hebrewLectures[hebrewLectureIdx]['URL']}</a></div>
-                  <div><b>Volume Title:</b> {hebrewLectures[hebrewLectureIdx]['Volume Title']}</div>
-                  <div><b>Lecture Title:</b> {hebrewLectures[hebrewLectureIdx]['Lecture Title']}</div>
-                  <div><b>Translator Name:</b> {hebrewLectures[hebrewLectureIdx]['Translator Name']}</div>
-                  <div><b>Original Language:</b> {hebrewLectures[hebrewLectureIdx]['Original Language']}</div>
-                </div>
-              )}
-              {/* English lecture metadata */}
-              {englishCandidates[englishCandidateIdx] && (
-                <div className="text-xs border rounded p-2 bg-muted/30 max-w-2xl">
-                  <div><b>GA:</b> {englishCandidates[englishCandidateIdx]['GA']}</div>
-                  <div><b>GA Title:</b> {englishCandidates[englishCandidateIdx]['GA Title']}</div>
-                  <div><b>Date:</b> {englishCandidates[englishCandidateIdx]['Date']}</div>
-                  <div><b>URL:</b> <a href={englishCandidates[englishCandidateIdx]['URL']} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">{englishCandidates[englishCandidateIdx]['URL']}</a></div>
-                  <div><b>Lecture Title:</b> {englishCandidates[englishCandidateIdx]['Lecture Title']}</div>
-                  <div><b>Original Language:</b> {englishCandidates[englishCandidateIdx]['Original Language']}</div>
-                </div>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={handlePrevEnglishCandidate} disabled={englishCandidateIdx === 0 || englishCandidates.length === 0}>Prev English</Button>
-              <span>English Candidate {englishCandidates.length === 0 ? 0 : englishCandidateIdx + 1} / {englishCandidates.length}</span>
-              <Button onClick={handleNextEnglishCandidate} disabled={englishCandidateIdx >= englishCandidates.length - 1 || englishCandidates.length === 0}>Next English</Button>
-              {englishCandidates[englishCandidateIdx] && (
-                <span className="ml-4 text-xs">Title: {englishCandidates[englishCandidateIdx]['Lecture Title']}</span>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="mb-2 flex justify-end">
-            <button
-              className="px-2 py-1 text-xs bg-muted border rounded hover:bg-muted/70"
-              onClick={() => setShowLectureNav(true)}
-              aria-label="Show lecture navigation"
-            >
-              Show ▼
-            </button>
-          </div>
-        )}
-        {/* URL Input Section */}
+             {/* --- Scoring & Matching Controls Pane (always visible) --- */}
+             <Card className="mb-2 shadow-sm">
+               <CardContent className="flex flex-wrap gap-2 items-center p-3">
+                 <Input
+                type="number"
+                min={1}
+                   max={processedParagraphs.hebrew.displayed.length}
+                   value={scoreStart}
+                   onChange={e => setScoreStart(e.target.value)}
+                   placeholder="Start"
+                   className="w-20"
+                   disabled={!textsAreLoaded || isScoring}
+                 />
+                 <span>-</span>
+                 <Input
+                   type="number"
+                   min={1}
+                   max={processedParagraphs.hebrew.displayed.length}
+                   value={scoreEnd}
+                   onChange={e => setScoreEnd(e.target.value)}
+                   placeholder="End (leave blank for all)"
+                   className="w-20"
+                   disabled={!textsAreLoaded || isScoring}
+              />
+              <Button
+                   onClick={handleScoreRange}
+                   disabled={!textsAreLoaded || isScoring || !scoreStart}
+                size="sm"
+                   variant="secondary"
+                   className="h-8 px-3"
+                 >
+                   {isScoring ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                   {isScoring ? 'Scoring...' : 'Score Selected'}
+              </Button>
+                 <Button
+                   onClick={handleCalculateAllScores}
+                   disabled={!textsAreLoaded || isScoring}
+                   className="h-8 px-3 text-xs"
+                   size="sm"
+                   variant="secondary"
+                 >
+                   {isScoring ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                   {isScoring ? 'Scoring...' : 'Score All Paragraphs'}
+                 </Button>
+                 <div className="flex items-center gap-1">
+                   <label htmlFor="hebrew-search-before" className="text-xs">Hebrew Window</label>
+                   <Input
+                     id="hebrew-search-before"
+                     type="number"
+                     min={0}
+                     max={10}
+                     value={hebrewSearchBefore}
+                     onChange={e => setHebrewSearchBefore(Number(e.target.value))}
+                     className="w-14"
+                     disabled={!textsAreLoaded || isMatchingSentences}
+                     style={{ fontSize: '0.9em' }}
+                   />
+                   <span className="text-xs">before</span>
+                   <Input
+                     id="hebrew-search-after"
+                     type="number"
+                     min={0}
+                     max={10}
+                     value={hebrewSearchAfter}
+                     onChange={e => setHebrewSearchAfter(Number(e.target.value))}
+                     className="w-14"
+                     disabled={!textsAreLoaded || isMatchingSentences}
+                     style={{ fontSize: '0.9em' }}
+                   />
+                   <span className="text-xs">after</span>
+                 </div>
+                 <Button
+                   onClick={handleFindSentenceMatches}
+                   disabled={!textsAreLoaded || isMatchingSentences}
+                   className="h-8 px-3 text-xs"
+                   size="sm"
+                   variant="secondary"
+                 >
+                   {isMatchingSentences ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
+                   {isMatchingSentences ? 'Matching...' : 'Match Sentences'}
+                 </Button>
+                 <Button
+                   onClick={() => { setHighlightMap({}); setEnglishHighlightMap({}); }}
+                   disabled={isMatchingSentences}
+                   className="h-8 px-3 text-xs"
+                   size="sm"
+                   variant="outline"
+                 >
+                   Clear Highlights
+                 </Button>
+               </CardContent>
+             </Card>
+             {/* --- Secondary Controls Pane (toggleable) --- */}
+             {showControlsPane && (
         <Card className="mb-4 shadow-sm">
-            <CardHeader className="py-2 px-3 border-b" />
+                 <CardHeader className="py-2 px-3 border-b flex flex-row justify-between items-center">
+                   <span className="font-semibold text-sm">Lecture, URL, and File Controls</span>
+                   <Button size="sm" variant="ghost" className="text-xs px-2 py-1" onClick={() => setShowControlsPane(false)}>Hide ▲</Button>
+                 </CardHeader>
             <CardContent className="grid grid-cols-1 sm:grid-cols-5 gap-2 p-3 items-end">
                 {/* Warning if JSONL file exists */}
                 {jsonlFileExists && (
@@ -1246,6 +1508,68 @@ return (
                     {isSaving ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
                     {isSaving ? 'Saving...' : 'Save Pairs to Folder'}
                 </Button>
+                    {/* Dump range controls */}
+                    <div className="space-y-1">
+                        <Label htmlFor="dump-start" className="text-xs">Dump Start (1-based)</Label>
+                        <Input
+                            id="dump-start"
+                            type="number"
+                            min={1}
+                            max={hebrewLectures.length}
+                            value={dumpStartIdx}
+                            onChange={e => setDumpStartIdx(Math.max(1, Math.min(hebrewLectures.length, Number(e.target.value))))}
+                            className="h-8 text-sm"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <Label htmlFor="dump-end" className="text-xs">Dump End (1-based)</Label>
+                        <Input
+                            id="dump-end"
+                            type="number"
+                            min={dumpStartIdx}
+                            max={hebrewLectures.length}
+                            value={dumpEndIdx}
+                            onChange={e => setDumpEndIdx(Math.max(dumpStartIdx, Math.min(hebrewLectures.length, Number(e.target.value))))}
+                            className="h-8 text-sm"
+                        />
+                    </div>
+                    <Button
+                        onClick={async () => {
+                            const allRecords: { request_id: string; paragraph: string }[] = [];
+                            for (let idx = dumpStartIdx - 1; idx <= dumpEndIdx - 1; idx++) {
+                                const lecture = hebrewLectures[idx];
+                                const hebrewUrl = lecture?.URL;
+                                const lectureTitle = lecture?.['Lecture Title'] || '';
+                                if (!hebrewUrl) continue;
+                                // Log to console for each lecture
+                                console.log(`Dumping lecture ${idx + 1} (CSV row ${idx + 2}): ${lectureTitle}`);
+                                try {
+                                    const { text: fetchedHebrew, error } = await fetchTextFromUrl(hebrewUrl);
+                                    if (error || !fetchedHebrew) continue;
+                                    const paragraphs = parseParagraphs(fetchedHebrew, 'hebrew');
+                                    paragraphs.forEach((paragraph, i) => {
+                                        allRecords.push({
+                                            request_id: `${i}_${idx + 2}`,
+                                            paragraph,
+                                        });
+                                    });
+                                } catch (e) {
+                                    continue;
+                                }
+                            }
+                            if (allRecords.length === 0) return;
+                            const jsonlContent = allRecords.map(r => JSON.stringify(r)).join('\n') + '\n';
+                            const filename = `hebrew_paragraphs_${dumpStartIdx}_to_${dumpEndIdx}.jsonl`;
+                            const blob = new Blob([jsonlContent], { type: "application/jsonl;charset=utf-8" });
+                            saveAs(blob, filename);
+                        }}
+                        disabled={hebrewLectures.length === 0 || dumpStartIdx > dumpEndIdx}
+                        className="w-full sm:w-auto h-8 text-xs"
+                        size="sm"
+                        variant="outline"
+                    >
+                        Dump Hebrew Paragraphs (Range)
+                    </Button>
                 <AlertDialog>
                     <AlertDialogTrigger asChild>
                         <Button
@@ -1273,7 +1597,108 @@ return (
                 </AlertDialog>
             </CardContent>
         </Card>
-
+             )}
+             {!showControlsPane && (
+               <div className="mb-2 flex justify-end">
+                 <Button size="sm" variant="ghost" className="text-xs px-2 py-1" onClick={() => setShowControlsPane(true)}>Show ▼</Button>
+               </div>
+             )}
+             {/* --- Hebrew/English Lecture Traversal Controls --- */}
+             {showLectureNav ? (
+               <div className="mb-4 flex flex-col gap-2 relative">
+                 <button
+                   className="absolute top-0 right-0 mt-1 mr-1 px-2 py-1 text-xs bg-muted border rounded hover:bg-muted/70"
+                   onClick={() => setShowLectureNav(false)}
+                   aria-label="Hide lecture navigation"
+                 >
+                   Hide ▲
+                 </button>
+                 <div className="flex items-center gap-2">
+                   <Button onClick={handlePrevHebrewLecture} disabled={hebrewLectureIdx === 0}>Prev Hebrew</Button>
+                   <span>Hebrew Lecture {hebrewLectureIdx + 1} / {hebrewLectures.length}</span>
+                   <Button onClick={handleNextHebrewLecture} disabled={hebrewLectureIdx >= hebrewLectures.length - 1}>Next Hebrew</Button>
+                   {/* Skip to specific lecture */}
+                   <input
+                     type="number"
+                     min={1}
+                     max={hebrewLectures.length}
+                     value={skipHebrewLecture}
+                     onChange={e => setSkipHebrewLecture(e.target.value.replace(/[^0-9]/g, ''))}
+                     placeholder="Go to..."
+                     className="w-20 px-2 py-1 border rounded text-xs ml-2"
+                     style={{ minWidth: 0 }}
+                   />
+                   <Button
+                     size="sm"
+                     className="h-7 px-2 text-xs"
+                     variant="outline"
+                     onClick={() => {
+                       const idx = parseInt(skipHebrewLecture, 10) - 1;
+                       if (!isNaN(idx) && idx >= 0 && idx < hebrewLectures.length) {
+                         setHebrewLectureIdx(idx);
+                         setManualHebrewUrl('');
+                         setManualEnglishUrl('');
+                       }
+                     }}
+                     disabled={
+                       !skipHebrewLecture ||
+                       isNaN(Number(skipHebrewLecture)) ||
+                       Number(skipHebrewLecture) < 1 ||
+                       Number(skipHebrewLecture) > hebrewLectures.length
+                     }
+                   >
+                     Go
+                   </Button>
+                   {hebrewLectures[hebrewLectureIdx] && (
+                     <span className="ml-4 text-xs">Date: {hebrewLectures[hebrewLectureIdx]['Date']} | Title: {hebrewLectures[hebrewLectureIdx]['Lecture Title']}</span>
+                   )}
+                 </div>
+                 {/* Display Hebrew and English lecture metadata side by side */}
+                 <div className="flex flex-row gap-8 mt-1">
+                   {/* Hebrew lecture metadata */}
+                   {hebrewLectures[hebrewLectureIdx] && (
+                     <div className="text-xs border rounded p-2 bg-muted/30 max-w-2xl">
+                       <div><b>GA:</b> {hebrewLectures[hebrewLectureIdx]['GA']}</div>
+                       <div><b>Date:</b> {hebrewLectures[hebrewLectureIdx]['Date']}</div>
+                       <div><b>URL:</b> <a href={hebrewLectures[hebrewLectureIdx]['URL']} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">{hebrewLectures[hebrewLectureIdx]['URL']}</a></div>
+                       <div><b>Volume Title:</b> {hebrewLectures[hebrewLectureIdx]['Volume Title']}</div>
+                       <div><b>Lecture Title:</b> {hebrewLectures[hebrewLectureIdx]['Lecture Title']}</div>
+                       <div><b>Translator Name:</b> {hebrewLectures[hebrewLectureIdx]['Translator Name']}</div>
+                       <div><b>Original Language:</b> {hebrewLectures[hebrewLectureIdx]['Original Language']}</div>
+                     </div>
+                   )}
+                   {/* English lecture metadata */}
+                   {englishCandidates[englishCandidateIdx] && (
+                     <div className="text-xs border rounded p-2 bg-muted/30 max-w-2xl">
+                       <div><b>GA:</b> {englishCandidates[englishCandidateIdx]['GA']}</div>
+                       <div><b>GA Title:</b> {englishCandidates[englishCandidateIdx]['GA Title']}</div>
+                       <div><b>Date:</b> {englishCandidates[englishCandidateIdx]['Date']}</div>
+                       <div><b>URL:</b> <a href={englishCandidates[englishCandidateIdx]['URL']} target="_blank" rel="noopener noreferrer" className="underline text-blue-600">{englishCandidates[englishCandidateIdx]['URL']}</a></div>
+                       <div><b>Lecture Title:</b> {englishCandidates[englishCandidateIdx]['Lecture Title']}</div>
+                       <div><b>Original Language:</b> {englishCandidates[englishCandidateIdx]['Original Language']}</div>
+                     </div>
+                   )}
+                 </div>
+                 <div className="flex items-center gap-2">
+                   <Button onClick={handlePrevEnglishCandidate} disabled={englishCandidateIdx === 0 || englishCandidates.length === 0}>Prev English</Button>
+                   <span>English Candidate {englishCandidates.length === 0 ? 0 : englishCandidateIdx + 1} / {englishCandidates.length}</span>
+                   <Button onClick={handleNextEnglishCandidate} disabled={englishCandidateIdx >= englishCandidates.length - 1 || englishCandidates.length === 0}>Next English</Button>
+                   {englishCandidates[englishCandidateIdx] && (
+                     <span className="ml-4 text-xs">Title: {englishCandidates[englishCandidateIdx]['Lecture Title']}</span>
+                   )}
+                 </div>
+               </div>
+             ) : (
+               <div className="mb-2 flex justify-end">
+                 <button
+                   className="px-2 py-1 text-xs bg-muted border rounded hover:bg-muted/70"
+                   onClick={() => setShowLectureNav(true)}
+                   aria-label="Show lecture navigation"
+                 >
+                   Show ▼
+                 </button>
+               </div>
+             )}
         {/* Alignment Section */}
         <div className="flex flex-grow gap-4 min-h-0">
             {/* English Panel */}
@@ -1293,6 +1718,9 @@ return (
                     isScrollSyncEnabled={isScrollSyncEnabled}
                     onToggleScrollSync={() => setIsScrollSyncEnabled(!isScrollSyncEnabled)}
                     onEditParagraph={handleEditParagraph('english')}
+                    onMergeUp={handleMergeUpEnglish}
+                    onMergeDown={handleMergeDownEnglish}
+                        highlightMap={englishHighlightMap}
                 />
             </div>
 
@@ -1350,49 +1778,12 @@ return (
                       toast({ title: 'Paragraph Split', description: 'Paragraph was split into two.', duration: 2000 });
                     }}
                     onEditParagraph={handleEditParagraph('hebrew')}
+                    onRevertLastPair={handleRevertLastPair}
+                    canRevertLastPair={jsonlRecords.length > 0}
+                         highlightMap={highlightMap}
                 />
             </div>
         </div>
-        <div className="flex items-center gap-2 mb-4">
-            <Input
-                type="number"
-                min={1}
-                max={processedParagraphs.hebrew.displayed.length}
-                value={scoreStart}
-                onChange={e => setScoreStart(e.target.value)}
-                placeholder="Start"
-                className="w-20"
-            />
-            <span>-</span>
-            <Input
-                type="number"
-                min={1}
-                max={processedParagraphs.hebrew.displayed.length}
-                value={scoreEnd}
-                onChange={e => setScoreEnd(e.target.value)}
-                placeholder="End (leave blank for all)"
-                className="w-20"
-            />
-            <Button
-                onClick={handleScoreRange}
-                disabled={!textsAreLoaded || isScoring || !scoreStart}
-                size="sm"
-                variant="secondary"
-            >
-                {isScoring ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
-                {isScoring ? 'Scoring...' : 'Score Selected'}
-            </Button>
-        </div>
-        <Button
-            onClick={handleCalculateAllScores}
-            disabled={!textsAreLoaded || isScoring}
-            className="mb-4 w-full sm:w-auto h-8 text-xs"
-            size="sm"
-            variant="secondary"
-        >
-            {isScoring ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : <Check className="mr-1 h-3 w-3" />}
-            {isScoring ? 'Scoring...' : 'Score All Paragraphs'}
-        </Button>
     </div>
 );
 }

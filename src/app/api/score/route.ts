@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { scorePair } from '@/lib/translate_score'; // Adjust path as necessary
+import { scorePair, hashParagraph, translateToEnglish } from '@/lib/translate_score';
+import { getFromCache, addToCache } from '@/lib/global_cache';
 
 export const runtime = 'nodejs'; // Use Node.js runtime for transformers.js
 
@@ -13,13 +14,27 @@ export async function POST(req: NextRequest) {
 
     console.log(`API received request to score: EN="${en.substring(0, 50)}...", HE="${he.substring(0, 50)}...", EN idx=${enIndex}, HE idx=${heIndex}`);
 
-    // Call the scoring function
-    // Make sure OPENAI_API_KEY is available in the environment where this serverless function runs
-    const scores = await scorePair({ en, he }, heIndex, enIndex);
+    // Use cache for translation
+    const key = hashParagraph(he);
+    let mt_en = getFromCache(key)?.en;
+    if (mt_en) {
+      console.log(`[CACHE HIT] Translation for hash ${key.substring(0, 8)} served from cache.`);
+    } else {
+      console.log(`[CACHE MISS] No cache for hash ${key.substring(0, 8)}. Will translate.`);
+      mt_en = await translateToEnglish(he);
+      if (mt_en !== '[Translation Error]') {
+        addToCache({ key, he, en: mt_en });
+      }
+    }
+
+    if (mt_en === '[Translation Error]') {
+      return NextResponse.json({ error: 'Translation failed.' }, { status: 500 });
+    }
+
+    const scores = await scorePair({ en, he }, mt_en, heIndex, enIndex);
 
     console.log(`API successfully scored pair. Blended score: ${scores.blended}`);
 
-    // Return the scores
     return NextResponse.json(scores);
 
   } catch (error: any) {

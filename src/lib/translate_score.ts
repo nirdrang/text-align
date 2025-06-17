@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { pipeline, cos_sim } from "@xenova/transformers";
 import unorm from "unorm";
+import { LectureJsonlCache } from "./lecture_cache";
 
 // Ensure OPENAI_API_KEY is set in your environment variables
 // Consider adding error handling for missing API key
@@ -17,15 +18,12 @@ export interface Scored extends Pair {
  len_ratio: number; // Length ratio between EN and MT-EN
 }
 
-// MT translation cache
-const mtCache: Record<string, string> = {};
-
-function hashParagraph(text: string): string {
+export function hashParagraph(text: string): string {
   // Simple hash: base64 of UTF-8 bytes
   return Buffer.from(text, 'utf-8').toString('base64');
 }
 
-async function translateToEnglish(text: string): Promise<string> {
+export async function translateToEnglish(text: string): Promise<string> {
  console.log(`[OpenAI] Preparing to translate text: "${text.substring(0, 50)}..."`);
  try {
   const chat = await openai.chat.completions.create({
@@ -34,7 +32,7 @@ async function translateToEnglish(text: string): Promise<string> {
    messages: [
     {
      role: "system",
-     content: "Translate from Hebrew to English. Return ONLY the translation."
+     content: "Translate the following Hebrew paragraph to English. Preserve sentence boundaries: for each Hebrew sentence, output the corresponding English sentence on a new line, in the same order. Do not merge or split sentences. Return ONLY the translation, one English sentence per line."
     },
     { role: "user", content: text }
    ]
@@ -48,21 +46,24 @@ async function translateToEnglish(text: string): Promise<string> {
  }
 }
 
-async function translateToEnglishWithCache(text: string): Promise<string> {
+export async function translateToEnglishWithCache(text: string, cache: LectureJsonlCache): Promise<string> {
+  console.log("[DEBUG] translateToEnglishWithCache called");
   const key = hashParagraph(text);
-  if (mtCache[key]) {
-    // Removed cache hit log for less clutter
-    return mtCache[key];
+  const shortKey = key.substring(0, 8);
+  console.log(`[CACHE CHECK] Checking cache for hash ${shortKey}... (text: "${text.substring(0, 50)}")`);
+  if (cache.has(key)) {
+    console.log(`[CACHE HIT] Translation for hash ${shortKey} served from cache.`);
+    return cache.get(key)!.en;
   }
   const translation = await translateToEnglish(text);
   if (translation !== "[Translation Error]") {
-    mtCache[key] = translation;
+    await cache.append({ key, he: text, en: translation });
   }
   return translation;
 }
 
 // ---------- BLEU‑1 (quick, sufficient for paragraph matching) ---------
-function bleu1(ref: string, hyp: string): number {
+export function bleu1(ref: string, hyp: string): number {
  // Simple BLEU-1 implementation
  const refTokens = new Set(ref.split(/\s+/));
  const hypTokens = hyp.split(/\s+/);
@@ -137,10 +138,9 @@ function lengthRatio(en: string, mt_en: string): number {
 }
 
 // ---------- main scorer -----------------------------------------------
-export async function scorePair(pair: Pair, heIndex?: number, enIndex?: number): Promise<Omit<Scored, 'en' | 'he'>> {
+export async function scorePair(pair: Pair, mt_en: string, heIndex?: number, enIndex?: number): Promise<Omit<Scored, 'en' | 'he'>> {
  const { en, he } = pair;
  console.log(`[ScorePair] Scoring pair: HE idx=${heIndex ?? 'N/A'}, EN idx=${enIndex ?? 'N/A'}`);
- const mt_en = await translateToEnglishWithCache(he);
 
  if (mt_en === "[Translation Error]") {
    console.warn("[ScorePair] Skipping scoring due to translation error.");
@@ -219,4 +219,30 @@ async function runDemo() {
 // Make sure .env.local has OPENAI_API_KEY
 // runDemo();
 ----------------------------------------------------------------------- */
+
+/**
+ * Splits a paragraph into sentences. Handles both English and Hebrew.
+ * For Hebrew, splits on period/question/exclamation marks followed by space or end of string.
+ * For English, splits on period/question/exclamation marks followed by space or end of string.
+ */
+export function splitSentences(text: string, language: 'english' | 'hebrew'): string[] {
+  if (!text) return [];
+  if (language === 'hebrew') {
+    // Hebrew: split on . ? ! followed by space or end of string
+    return text
+      .replace(/([.?!])(?=\s|$)/g, '$1|')
+      .split('|')
+      .map(s => s.trim())
+      .filter(Boolean);
+  } else {
+    // English: split on . ? ! followed by space or end of string
+    return text
+      .replace(/([.?!])(?=\s|$)/g, '$1|')
+      .split('|')
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+}
+
+export { cosine };
 

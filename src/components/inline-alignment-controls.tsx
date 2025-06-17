@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Check, Link2Off } from 'lucide-react'; // Removed BrainCircuit, Loader2
+import { Check, Link2Off, Eraser } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -15,6 +15,8 @@ interface InlineAlignmentControlsProps {
   canUnlink: boolean;
   // Removed isSuggesting and hasSuggestions props
   disabled?: boolean;
+  onRevertLastPair?: () => void;
+  canRevertLastPair?: boolean;
 }
 
 const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
@@ -25,6 +27,8 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
   canUnlink,
   // Removed isSuggesting, hasSuggestions
   disabled = false,
+  onRevertLastPair,
+  canRevertLastPair = false,
 }) => {
   return (
     <TooltipProvider delayDuration={100}>
@@ -69,7 +73,23 @@ const InlineAlignmentControls: React.FC<InlineAlignmentControlsProps> = ({
                     <p>Confirm Selected Pair</p>
                 </TooltipContent>
             </Tooltip>
-
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        onClick={onRevertLastPair}
+                        disabled={!canRevertLastPair || disabled}
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                        aria-label="Revert last confirmed pair"
+                    >
+                        <Eraser className="h-4 w-4 rotate-180" />
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                    <p>Revert Last Confirmed Pair</p>
+                </TooltipContent>
+            </Tooltip>
              <Tooltip>
                 <TooltipTrigger asChild>
                     <Button

@@ -47,3 +47,8 @@ next-env.d.ts
 *.njsproj
 *.sln
 *.sw?
+
+# new rules
+*.jsonl
+data-pairs/
+cache/
