@@ -728,9 +728,10 @@ export default function Home() {
          const hebSentencesHebrew = splitSentences(hebPara, 'hebrew');
          console.log(`[DEBUG] [engIdx ${engIdx}] Hebrew paragraph ${hebIdx} split into sentences (EN):`, hebSentencesEnglish);
          console.log(`[DEBUG] [engIdx ${engIdx}] Hebrew paragraph ${hebIdx} split into sentences (HE):`, hebSentencesHebrew);
-         hebSentencesEnglish.forEach((heSent, sIdx) => {
-           const greenScore = bleu1(firstSentence, heSent);
-           const redScore = bleu1(lastSentence, heSent);
+         for (let sIdx = 0; sIdx < hebSentencesEnglish.length; sIdx++) {
+           const heSent = hebSentencesEnglish[sIdx];
+           const greenScore = await advancedSentenceScore(firstSentence, heSent);
+           const redScore = await advancedSentenceScore(lastSentence, heSent);
            // Separate logs for start (green) and end (red) matching
            // For start match, English sentence index is 0
            console.log(`[DEBUG][START MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx 0][hebSentIdx ${sIdx}] greenScore =`, greenScore, '| current max =', bestGreen.score, '\n  firstSentence:', firstSentence, '\n  heSent:', heSent);
@@ -744,8 +745,25 @@ export default function Home() {
              bestRed = { paraIdx: hebIdx, sentIdx: sIdx, score: redScore };
              console.log(`[DEBUG][END MATCH][engIdx ${engIdx}][hebIdx ${hebIdx}][engSentIdx ${engEndSentIdx}][hebSentIdx ${sIdx}] New best red: score ${redScore}`);
            }
-         });
+         }
        }
+       
+       // Handle conflicts: if green and red point to the same sentence, resolve the conflict
+       if (bestGreen.paraIdx !== -1 && bestRed.paraIdx !== -1 && 
+           bestGreen.paraIdx === bestRed.paraIdx && bestGreen.sentIdx === bestRed.sentIdx) {
+         console.log(`[engIdx ${engIdx}] Conflict detected: both green and red want hebIdx ${bestGreen.paraIdx}, sentIdx ${bestGreen.sentIdx}`);
+         console.log(`[engIdx ${engIdx}] Green score: ${bestGreen.score}, Red score: ${bestRed.score}`);
+         
+         // Keep the one with higher score, clear the other
+         if (bestGreen.score >= bestRed.score) {
+           console.log(`[engIdx ${engIdx}] Keeping green (higher score), clearing red`);
+           bestRed = { paraIdx: -1, sentIdx: -1, score: 0 };
+         } else {
+           console.log(`[engIdx ${engIdx}] Keeping red (higher score), clearing green`);
+           bestGreen = { paraIdx: -1, sentIdx: -1, score: 0 };
+         }
+       }
+       
        if (bestGreen.paraIdx !== -1) {
          setHighlightMap(prev => ({
            ...prev,
@@ -801,86 +819,109 @@ export default function Home() {
        toast({ title: "Started Pairing Fresh", description: "Cleared confirmed pairs.", duration: 2000 });
    };
 
-  // Scroll synchronization logic (remains largely the same)
+  // Scroll synchronization: keeps corresponding paragraph display numbers aligned between panels
   useEffect(() => {
-     if (!isScrollSyncEnabled) {
+     // Find the scrollable div within each panel
+     const englishPanel = englishPanelRef.current;
+     const hebrewPanel = hebrewPanelRef.current;
+     
+     const englishScrollArea = englishPanel?.querySelector('.overflow-y-scroll') as HTMLElement;
+     const hebrewScrollArea = hebrewPanel?.querySelector('.overflow-y-scroll') as HTMLElement;
+
+     if (!englishScrollArea || !hebrewScrollArea) {
          return;
      }
-
-     const englishViewport = englishPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
-     const hebrewViewport = hebrewPanelRef.current?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
-
-     if (!englishViewport || !hebrewViewport) {
-         return;
-     }
-
-     const getTopVisibleDisplayedIndex = (viewport: HTMLElement, panelRef: React.RefObject<HTMLDivElement>): number => {
-          if (!viewport || !panelRef.current) return -1;
-          const viewportRect = viewport.getBoundingClientRect();
-          const paragraphElements = Array.from(panelRef.current.querySelectorAll('.paragraph-box')) as HTMLElement[];
-
-          for (let i = 0; i < paragraphElements.length; i++) {
-              const pElement = paragraphElements[i];
-              const pRect = pElement.getBoundingClientRect();
-               if (pRect.top >= viewportRect.top) {
-                  return i;
-              }
-          }
-          return paragraphElements.length > 0 ? paragraphElements.length - 1 : -1;
-     };
-
-     const syncScroll = (sourceViewport: HTMLElement, targetViewport: HTMLElement, sourcePanelRef: React.RefObject<HTMLDivElement>, targetPanelRef: React.RefObject<HTMLDivElement>) => {
-         const currentDisplayedIndex = getTopVisibleDisplayedIndex(sourceViewport, sourcePanelRef);
-          if (currentDisplayedIndex === -1 || !targetViewport || !targetPanelRef.current) {
-             return;
-         }
-
-         const targetParagraphElements = Array.from(targetPanelRef.current.querySelectorAll('.paragraph-box')) as HTMLElement[];
-         const targetElement = targetParagraphElements[currentDisplayedIndex];
-
-         if (targetElement) {
-             const scrollToPosition = targetElement.offsetTop;
-             targetViewport.scrollTo({ top: scrollToPosition, behavior: 'auto' });
-         } else {
-             const fallbackIndex = Math.min(currentDisplayedIndex, targetParagraphElements.length - 1);
-              if (fallbackIndex >= 0) {
-                  const fallbackElement = targetParagraphElements[fallbackIndex];
-                  const fallbackTop = fallbackElement.offsetTop;
-                  targetViewport.scrollTo({ top: fallbackTop, behavior: 'auto' });
-              }
-         }
-     };
 
      let englishScrollTimeout: NodeJS.Timeout | null = null;
      let hebrewScrollTimeout: NodeJS.Timeout | null = null;
      let isProgrammaticScroll = false;
 
+     const getTopVisibleDisplayedIndex = (scrollArea: HTMLElement): number => {
+          if (!scrollArea) return -1;
+          const scrollAreaRect = scrollArea.getBoundingClientRect();
+          const paragraphElements = Array.from(scrollArea.querySelectorAll('.paragraph-box')) as HTMLElement[];
+
+          // Find the paragraph that's most prominently visible at the top
+          for (let i = 0; i < paragraphElements.length; i++) {
+              const pElement = paragraphElements[i];
+              const pRect = pElement.getBoundingClientRect();
+              
+              // Check if this paragraph is meaningfully visible (more than just bottom edge)
+              const visibleHeight = Math.min(pRect.bottom, scrollAreaRect.bottom) - Math.max(pRect.top, scrollAreaRect.top);
+              if (visibleHeight > 20) { // At least 20px visible
+                  return i;
+              }
+          }
+          return 0; // Default to first paragraph
+     };
+
+     const syncScroll = (sourceScrollArea: HTMLElement, targetScrollArea: HTMLElement) => {
+         const sourceTopIndex = getTopVisibleDisplayedIndex(sourceScrollArea);
+         
+         // Get the display number of the currently visible source paragraph
+         const sourceParagraphs = Array.from(sourceScrollArea.querySelectorAll('.paragraph-box')) as HTMLElement[];
+         const sourceParagraph = sourceParagraphs[sourceTopIndex];
+         if (!sourceParagraph) return;
+         
+         const sourceNumberSpan = sourceParagraph.querySelector('span');
+         const sourceDisplayNumber = sourceNumberSpan ? parseInt(sourceNumberSpan.textContent || '1') : sourceTopIndex + 1;
+         
+         // Find the target paragraph with the same display number
+         const targetParagraphs = Array.from(targetScrollArea.querySelectorAll('.paragraph-box')) as HTMLElement[];
+         let targetParagraph = null;
+         
+         for (let i = 0; i < targetParagraphs.length; i++) {
+             const paragraph = targetParagraphs[i];
+             const numberSpan = paragraph.querySelector('span');
+             const displayNumber = numberSpan ? parseInt(numberSpan.textContent || '1') : i + 1;
+             
+             if (displayNumber === sourceDisplayNumber) {
+                 targetParagraph = paragraph;
+                 break;
+             }
+         }
+
+         if (targetParagraph) {
+             // Calculate precise scroll position to align the target paragraph at the top
+             const containerRect = targetScrollArea.getBoundingClientRect();
+             const paragraphRect = targetParagraph.getBoundingClientRect();
+             
+             const currentScrollTop = targetScrollArea.scrollTop;
+             const paragraphOffsetFromTop = paragraphRect.top - containerRect.top;
+             const newScrollTop = currentScrollTop + paragraphOffsetFromTop;
+             
+             targetScrollArea.scrollTop = newScrollTop;
+         }
+     };
+
      const handleEnglishScroll = () => {
-         if (isProgrammaticScroll) return;
+         if (!isScrollSyncEnabled || isProgrammaticScroll) return;
          if (englishScrollTimeout) clearTimeout(englishScrollTimeout);
          englishScrollTimeout = setTimeout(() => {
               isProgrammaticScroll = true;
-              syncScroll(englishViewport, hebrewViewport, englishPanelRef, hebrewPanelRef);
+              syncScroll(englishScrollArea, hebrewScrollArea);
               setTimeout(() => isProgrammaticScroll = false, 150);
          }, 100);
      };
 
      const handleHebrewScroll = () => {
-         if (isProgrammaticScroll) return;
+         if (!isScrollSyncEnabled || isProgrammaticScroll) return;
           if (hebrewScrollTimeout) clearTimeout(hebrewScrollTimeout);
           hebrewScrollTimeout = setTimeout(() => {
               isProgrammaticScroll = true;
-              syncScroll(hebrewViewport, englishViewport, hebrewPanelRef, englishPanelRef);
+              syncScroll(hebrewScrollArea, englishScrollArea);
               setTimeout(() => isProgrammaticScroll = false, 150);
           }, 100);
       };
 
-     englishViewport.addEventListener('scroll', handleEnglishScroll);
-     hebrewViewport.addEventListener('scroll', handleHebrewScroll);
+     // Always add event listeners, but check isScrollSyncEnabled inside the handlers
+     englishScrollArea.addEventListener('scroll', handleEnglishScroll);
+     hebrewScrollArea.addEventListener('scroll', handleHebrewScroll);
 
+      // Always return cleanup function to ensure event listeners are removed
       return () => {
-         englishViewport?.removeEventListener('scroll', handleEnglishScroll);
-         hebrewViewport?.removeEventListener('scroll', handleHebrewScroll);
+         englishScrollArea?.removeEventListener('scroll', handleEnglishScroll);
+         hebrewScrollArea?.removeEventListener('scroll', handleHebrewScroll);
          if (englishScrollTimeout) clearTimeout(englishScrollTimeout);
          if (hebrewScrollTimeout) clearTimeout(hebrewScrollTimeout);
       };
@@ -1313,11 +1354,56 @@ function handleMergeDownEnglish(displayedIndex: number) {
  };
  // --- END SCORING FUNCTIONALITY ---
 
-// Only block rendering, not hook calls
-if (!isClient) return null;
+  // Advanced sentence scoring function using API call instead of direct import
+  const advancedSentenceScore = async (en: string, mt_en: string): Promise<number> => {
+    try {
+      const response = await fetch('/api/sentence_match', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          englishSentences: [en],
+          hebrewParagraphEnglish: mt_en
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn('Advanced scoring API failed, falling back to BLEU-1');
+        return bleu1(en, mt_en);
+      }
+
+      const result = await response.json();
+      if (result.matches && result.matches.length > 0) {
+        return result.matches[0].score;
+      } else {
+        return bleu1(en, mt_en);
+      }
+    } catch (error) {
+      console.warn('Advanced scoring failed, falling back to BLEU-1:', error);
+      return bleu1(en, mt_en);
+    }
+  };
+
+  // Only block rendering, not hook calls
+  if (!isClient) return null;
 
 return (
-    <div className="flex flex-col h-screen p-4 bg-background">
+    <div className="flex flex-col h-screen bg-background">
+        {/* Navigation Bar */}
+        <div className="flex items-center justify-between p-4 border-b bg-background">
+            <h1 className="text-xl font-semibold">Text Aligner</h1>
+            <div className="flex gap-2">
+                <Button variant="default" size="sm">
+                    Text Alignment
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                    <a href="/nikud">Nikud Processor</a>
+                </Button>
+            </div>
+        </div>
+        
+        <div className="flex flex-col flex-grow p-4">
              {/* --- Scoring & Matching Controls Pane (always visible) --- */}
              <Card className="mb-2 shadow-sm">
                <CardContent className="flex flex-wrap gap-2 items-center p-3">
@@ -1783,6 +1869,7 @@ return (
                          highlightMap={highlightMap}
                 />
             </div>
+        </div>
         </div>
     </div>
 );

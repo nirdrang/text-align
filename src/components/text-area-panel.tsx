@@ -2,7 +2,6 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Loader2, Link as LinkIcon, Link2Off as LinkOffIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -206,7 +205,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
 
     return (
         <TooltipProvider delayDuration={100}>
-            <Card className="flex flex-col h-full shadow-md">
+            <Card className="flex flex-col shadow-md" style={{ height: "calc(100vh - 200px)" }}>
             <CardHeader className="flex flex-row items-center justify-between py-3 px-4">
                  <div className="flex items-center space-x-2">
                     <CardTitle className="text-lg">{title}</CardTitle>
@@ -243,8 +242,16 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                 />
                 )}
             </CardHeader>
-            <CardContent className="flex flex-col flex-grow p-0 overflow-hidden">
-                <ScrollArea className="flex-grow px-4 pb-4" ref={panelRef as React.RefObject<any>}>
+            <CardContent className="flex flex-col flex-grow p-0">
+                <div 
+                    ref={panelRef}
+                    className="px-4 pb-4 overflow-y-scroll"
+                    style={{ 
+                        height: "calc(100vh - 280px)",
+                        scrollbarWidth: "auto",
+                        scrollbarColor: "#666 #ccc"
+                    }}
+                >
                     <div className="space-y-2 outline-none" tabIndex={0}>
                     {isLoading ? (
                     <div className="flex flex-col items-center justify-center h-full space-y-4 p-10">
@@ -261,16 +268,13 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     <p className="text-muted-foreground p-3 text-center italic">
                         {`No paragraphs detected or all paragraphs were filtered out as metadata in the ${title} text.`}
                     </p>
-                    ) : hasContent ? (
+                    ) : displayedParagraphs.length > 0 ? (
                     displayedParagraphs.map((item, displayedIndex) => {
                         const { paragraph, originalIndex, score, len_ratio } = item;
                         const isSelected = selectedOriginalIndex === originalIndex;
                         let highlightInfo: { green?: number; red?: number; greenOnly?: boolean } | undefined = undefined;
                         if (highlightMap) {
                             highlightInfo = highlightMap[displayedIndex];
-                        }
-                        if (highlightInfo) {
-                          // Removed debug log
                         }
                         return (
                             <ParagraphBox
@@ -299,7 +303,7 @@ const TextAreaPanel: React.FC<TextAreaPanelProps> = ({
                     </p>
                     )}
                 </div>
-                </ScrollArea>
+                </div>
             </CardContent>
             </Card>
             {/* Split Dialog */}
